@@ -15,21 +15,131 @@ const ProxyUpstreamSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
 });
 
+/**
+ * Access policy for a proxy upstream. Controls who may invoke tools.
+ *   - "public":  no identity check (default when unset) — backwards compatible
+ *   - "katalon": caller's email must end with one of the configured suffixes
+ *   - "support": caller's email must be in `support_team_emails`
+ *
+ * The gate runs BEFORE the allow/approve classification and BEFORE any
+ * upstream call. A denied request returns 403 and never touches the upstream.
+ */
+const AccessPolicySchema = z.enum(["public", "katalon", "support"]);
+export type AccessPolicy = z.infer<typeof AccessPolicySchema>;
+
 const ProxyConfigSchema = z.object({
   upstream: ProxyUpstreamSchema,
   allow: z.array(z.string()).default([]),
   approve: z.array(z.string()).default([]),
+  /** Who can invoke this upstream. Defaults to "public" (no check). */
+  access: AccessPolicySchema.optional(),
+  /** Whether to inject per-user credentials from the vault into the upstream
+   *  call. Requires `access` to be "support" or "katalon". When true and a
+   *  user has no enrolled creds, the request is rejected with 412. When
+   *  false or unset, the upstream uses its container-wide credentials. */
+  per_user_creds: z.boolean().optional(),
+  /**
+   * How per-user credentials reach the upstream.
+   *   - "args": the proxy adds a reserved `_kally_auth` field to the tool
+   *     call arguments. The upstream MCP server (Kally-owned, e.g.
+   *     salesforce-mcp) reads it, strips it, and uses the creds for the
+   *     duration of that request.
+   *   - "connection": the proxy opens a separate MCP connection per user,
+   *     baking the user's credential into the transport headers. Used for
+   *     third-party MCP servers (e.g. Atlassian) that expect auth at the
+   *     transport layer. Connections are cached per user and evicted on
+   *     idle TTL.
+   * Defaults to "args" for backwards compatibility.
+   */
+  creds_injection: z.enum(["args", "connection"]).optional(),
 });
 
 export const WorkspaceConfigSchema = z.object({
   repos: z.record(z.string(), RepoConfigSchema),
   proxies: z.record(z.string(), ProxyConfigSchema).optional(),
+  /** List of Katalon emails that count as Support team members. Used by
+   *  proxies with `access: "support"`. */
+  support_team_emails: z.array(z.string()).default([]),
+  /** Email domain suffixes that count as "katalon" access (e.g. "@katalon.com").
+   *  Used by proxies with `access: "katalon"`. */
+  katalon_email_suffixes: z.array(z.string()).default(["@katalon.com"]),
 });
 
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 export type ProxyConfig = z.infer<typeof ProxyConfigSchema>;
 export type ProxyUpstream = z.infer<typeof ProxyUpstreamSchema>;
+
+// ── Access check ────────────────────────────────────────────────────────────
+
+export interface AccessUser {
+  /** Slack user id, e.g. "U0AB0BK0FMX". */
+  user_id?: string;
+  /** Canonical email (lowercased recommended). */
+  user_email?: string;
+}
+
+export type AccessDecision =
+  | { ok: true }
+  | { ok: false; reason: "unknown_user" | "not_support" | "not_katalon"; message: string };
+
+/**
+ * Decide whether a user may call this upstream. Returns a typed reason on
+ * deny so the proxy can format a user-friendly Slack message.
+ *
+ * "public" (or unset access): always allow — backwards compat path.
+ * "katalon": user_email must end with one of katalon_email_suffixes.
+ * "support": user_email must be in support_team_emails (case-insensitive).
+ */
+export function checkUserAccess(
+  config: WorkspaceConfig,
+  proxy: ProxyConfig,
+  user: AccessUser,
+): AccessDecision {
+  const policy = proxy.access ?? "public";
+  if (policy === "public") return { ok: true };
+
+  if (!user.user_email) {
+    return {
+      ok: false,
+      reason: "unknown_user",
+      message:
+        "Your Slack account isn't linked to an email Kally can see. Ask the admin " +
+        "to grant the bot the `users:read.email` scope, then mention @Kally again.",
+    };
+  }
+
+  const email = user.user_email.toLowerCase();
+
+  if (policy === "katalon") {
+    const suffixes = (config.katalon_email_suffixes ?? []).map((s) => s.toLowerCase());
+    const ok = suffixes.some((s) => email.endsWith(s));
+    if (!ok) {
+      return {
+        ok: false,
+        reason: "not_katalon",
+        message:
+          "This tool is restricted to Katalon team members. Your account " +
+          `(${user.user_email}) isn't recognized.`,
+      };
+    }
+    return { ok: true };
+  }
+
+  // policy === "support"
+  const team = new Set((config.support_team_emails ?? []).map((s) => s.toLowerCase()));
+  if (!team.has(email)) {
+    return {
+      ok: false,
+      reason: "not_support",
+      message:
+        `Salesforce tools are restricted to the Product Support team. ` +
+        `Your account (${user.user_email}) isn't on the team list. ` +
+        "Ping <@U0AB0BK0FMX> if you think this is wrong.",
+    };
+  }
+  return { ok: true };
+}
 
 // --- Loader ---
 
