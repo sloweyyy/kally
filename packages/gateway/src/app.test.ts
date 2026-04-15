@@ -639,22 +639,34 @@ describe("gateway", () => {
     });
   });
 
-  it("ignores events from channels not in the allowlist", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+  // Channel allowlist is temporarily disabled in app.ts — see the commented
+  // isChannelAllowed block there. Kally now responds in any public channel
+  // it has been added to (Slack's /invite is the implicit gate). When the
+  // allowlist is re-enabled, flip this test back to expecting `ignored: true`.
+  it("accepts events from any channel when the allowlist is disabled", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/reaction") || String(url).endsWith("/trigger")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
 
     await withServer(
       fetchImpl,
-      async (baseUrl) => {
+      async (baseUrl, queue) => {
         const body = JSON.stringify({
           type: "event_callback",
-          event_id: "EvBlocked",
+          event_id: "EvAllowed",
           team_id: "T123",
           event: {
             type: "app_mention",
             user: "U123",
             text: "<@U999> hello",
             ts: "1710000000.050",
-            channel: "C_NOT_ALLOWED",
+            channel: "C_NOT_IN_CONFIG",
           },
         });
         const timestamp = `${Math.floor(Date.now() / 1000)}`;
@@ -670,8 +682,9 @@ describe("gateway", () => {
         });
 
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ ok: true, ignored: true });
-        expect(fetchImpl).not.toHaveBeenCalled();
+        // ACK is bare {ok:true}, no "ignored" marker — the event was accepted
+        expect(await response.json()).toEqual({ ok: true });
+        await queue.flush();
       },
       { getConfig: fakeConfigLoader(["C_ALLOWED"]) },
     );
