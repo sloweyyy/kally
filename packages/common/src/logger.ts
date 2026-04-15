@@ -2,7 +2,7 @@
  * Structured JSON logger backed by pino.
  *
  * Usage:
- *   import { createLogger, logInfo, logError } from "@thor/common";
+ *   import { createLogger, logInfo, logError } from "@kally/common";
  *   const logger = createLogger("proxy");
  *   logInfo(logger, "config_loaded", { upstreams: ["atlassian", "posthog"] });
  *   logError(logger, "start_failed", new Error("port in use"), { port: 3001 });

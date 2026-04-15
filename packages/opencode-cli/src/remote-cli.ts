@@ -2,45 +2,48 @@
  * Shared HTTP client for git/gh/scoutqa wrapper scripts.
  *
  * Usage: node remote-cli.mjs <endpoint> <arg1> <arg2> ...
- *   endpoint: "git", "gh", "scoutqa", "langfuse", or "metabase"
+ *   endpoint: "git", "gh", or "scoutqa"
  *
  * Env:
- *   THOR_REMOTE_CLI_URL — base URL of the remote-cli service (e.g. http://remote-cli:3004)
+ *   KALLY_REMOTE_CLI_URL — base URL of the remote-cli service (e.g. http://remote-cli:3004)
  *
  * git/gh endpoints return buffered JSON: { stdout, stderr, exitCode }
  * scoutqa endpoint streams NDJSON: { stream, data } chunks + { exitCode } final line
  */
 
-import { ExecResultSchema, NdjsonChunkSchema } from "@thor/common";
+import { ExecResultSchema, NdjsonChunkSchema } from "@kally/common";
 
 const [endpoint, ...args] = process.argv.slice(2);
 
 if (!endpoint) {
-  process.stderr.write("Usage: remote-cli.mjs <git|gh|scoutqa|langfuse|metabase> [args...]\n");
+  process.stderr.write("Usage: remote-cli.mjs <git|gh|scoutqa> [args...]\n");
   process.exit(1);
 }
 
-const baseUrl = process.env.THOR_REMOTE_CLI_URL;
+const baseUrl = process.env.KALLY_REMOTE_CLI_URL;
 if (!baseUrl) {
-  process.stderr.write("THOR_REMOTE_CLI_URL is not set\n");
+  process.stderr.write("KALLY_REMOTE_CLI_URL is not set\n");
   process.exit(1);
 }
 
 const url = `${baseUrl}/exec/${endpoint}`;
 const cwd = process.cwd();
-const sessionId = process.env.THOR_OPENCODE_SESSION_ID || "";
-const callId = process.env.THOR_OPENCODE_CALL_ID || "";
-const nonRepoScopedEndpoints = new Set(["langfuse", "metabase"]);
+const sessionId = process.env.KALLY_OPENCODE_SESSION_ID || "";
+const callId = process.env.KALLY_OPENCODE_CALL_ID || "";
+const userSlackId = process.env.KALLY_USER_SLACK_ID || "";
+const userEmail = process.env.KALLY_USER_EMAIL || "";
 
 try {
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(sessionId && { "x-thor-session-id": sessionId }),
-      ...(callId && { "x-thor-call-id": callId }),
+      ...(sessionId && { "x-kally-session-id": sessionId }),
+      ...(callId && { "x-kally-call-id": callId }),
+      ...(userSlackId && { "x-kally-user-slack-id": userSlackId }),
+      ...(userEmail && { "x-kally-user-email": userEmail }),
     },
-    body: JSON.stringify(nonRepoScopedEndpoints.has(endpoint) ? { args } : { args, cwd }),
+    body: JSON.stringify({ args, cwd }),
   });
 
   const contentType = res.headers.get("content-type") || "";

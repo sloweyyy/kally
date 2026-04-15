@@ -281,7 +281,7 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeMention("key-1", "hey @thor"));
+    queue.enqueue(makeMention("key-1", "hey @kally"));
 
     // Before debounce window
     setTime(BASE_TIME + 2_999);
@@ -292,7 +292,7 @@ describe("EventQueue", () => {
     setTime(BASE_TIME + 3_000);
     await queue.flush();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(batchTexts(handler)).toEqual([["hey @thor"]]);
+    expect(batchTexts(handler)).toEqual([["hey @kally"]]);
   });
 
   it("S4: non-mention, no session — fires after 60s", async () => {
@@ -343,7 +343,7 @@ describe("EventQueue", () => {
 
     // Mention arrives at T+10s with 3s delay (readyAt = T+13s)
     setTime(BASE_TIME + 10_000);
-    queue.enqueue(makeMention("key-1", "hey @thor"));
+    queue.enqueue(makeMention("key-1", "hey @kally"));
 
     // At T+12.999s — not ready (interrupt readyAt = T+13s)
     setTime(BASE_TIME + 12_999);
@@ -356,7 +356,7 @@ describe("EventQueue", () => {
     expect(handler).toHaveBeenCalledTimes(1);
     const texts = batchTexts(handler)[0];
     expect(texts).toContain("unaddressed");
-    expect(texts).toContain("hey @thor");
+    expect(texts).toContain("hey @kally");
   });
 
   it("S8: mention in thread A while session runs for thread B — independent", async () => {

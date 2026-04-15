@@ -6,7 +6,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import type { ExecResult } from "@thor/common";
+import type { ExecResult } from "@kally/common";
 
 const TIMEOUT_MS = 60_000;
 const STREAM_TIMEOUT_MS = 300_000; // 5 minutes for streaming commands

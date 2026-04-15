@@ -1,5 +1,5 @@
 import express from "express";
-import { createLogger, logInfo, logError, computeGitAlias, formatThorMeta } from "@thor/common";
+import { createLogger, logInfo, logError, computeGitAlias, formatKallyMeta } from "@kally/common";
 import { execCommand, execCommandStream } from "./exec.js";
 import {
   validateCwd,
@@ -15,13 +15,22 @@ const log = createLogger("remote-cli");
 
 const PORT = parseInt(process.env.PORT || "3004", 10);
 
-/** Extract Thor tracing IDs from request headers. */
-function thorIds(req: express.Request): { sessionId?: string; callId?: string } {
-  const sessionId = req.headers["x-thor-session-id"] as string | undefined;
-  const callId = req.headers["x-thor-call-id"] as string | undefined;
+/** Extract Kally tracing IDs from request headers. */
+function kallyIds(req: express.Request): {
+  sessionId?: string;
+  callId?: string;
+  user_id?: string;
+  user_email?: string;
+} {
+  const sessionId = req.headers["x-kally-session-id"] as string | undefined;
+  const callId = req.headers["x-kally-call-id"] as string | undefined;
+  const user_id = req.headers["x-kally-user-slack-id"] as string | undefined;
+  const user_email = req.headers["x-kally-user-email"] as string | undefined;
   return {
     ...(sessionId && { sessionId }),
     ...(callId && { callId }),
+    ...(user_id && { user_id }),
+    ...(user_email && { user_email }),
   };
 }
 
@@ -55,15 +64,20 @@ app.post("/exec/git", async (req, res) => {
       return;
     }
 
-    logInfo(log, "exec_git", { args, cwd, ...thorIds(req) });
+    logInfo(log, "exec_git", { args, cwd, ...kallyIds(req) });
     const result = await execCommand("git", args, cwd);
     if ((result.exitCode ?? 0) === 0) {
       const alias = computeGitAlias("git", args, cwd);
-      if (alias) result.stdout = (result.stdout || "") + formatThorMeta(alias);
+      if (alias) result.stdout = (result.stdout || "") + formatKallyMeta(alias);
     }
     res.json(result);
   } catch (err) {
-    logError(log, "exec_git_error", err instanceof Error ? err.message : String(err), thorIds(req));
+    logError(
+      log,
+      "exec_git_error",
+      err instanceof Error ? err.message : String(err),
+      kallyIds(req),
+    );
     res.status(500).json({ stdout: "", stderr: "Internal server error", exitCode: 1 });
   }
 });
@@ -89,15 +103,15 @@ app.post("/exec/gh", async (req, res) => {
       return;
     }
 
-    logInfo(log, "exec_gh", { args, cwd, ...thorIds(req) });
+    logInfo(log, "exec_gh", { args, cwd, ...kallyIds(req) });
     const result = await execCommand("gh", args, cwd);
     if ((result.exitCode ?? 0) === 0) {
       const alias = computeGitAlias("gh", args, cwd);
-      if (alias) result.stdout = (result.stdout || "") + formatThorMeta(alias);
+      if (alias) result.stdout = (result.stdout || "") + formatKallyMeta(alias);
     }
     res.json(result);
   } catch (err) {
-    logError(log, "exec_gh_error", err instanceof Error ? err.message : String(err), thorIds(req));
+    logError(log, "exec_gh_error", err instanceof Error ? err.message : String(err), kallyIds(req));
     res.status(500).json({ stdout: "", stderr: "Internal server error", exitCode: 1 });
   }
 });
@@ -120,7 +134,7 @@ app.post("/exec/scoutqa", async (req, res) => {
       return;
     }
 
-    logInfo(log, "exec_scoutqa", { args, ...thorIds(req) });
+    logInfo(log, "exec_scoutqa", { args, ...kallyIds(req) });
 
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
@@ -141,7 +155,7 @@ app.post("/exec/scoutqa", async (req, res) => {
       log,
       "exec_scoutqa_error",
       err instanceof Error ? err.message : String(err),
-      thorIds(req),
+      kallyIds(req),
     );
     if (!res.headersSent) {
       res.status(500).json({ stdout: "", stderr: "Internal server error", exitCode: 1 });
@@ -172,7 +186,7 @@ app.post("/exec/langfuse", async (req, res) => {
     const needsJson = action === "list" || action === "get";
     const finalArgs = !needsJson || args.includes("--json") ? args : [...args, "--json"];
 
-    logInfo(log, "exec_langfuse", { args: finalArgs, ...thorIds(req) });
+    logInfo(log, "exec_langfuse", { args: finalArgs, ...kallyIds(req) });
     const result = await execCommand("langfuse", finalArgs, "/workspace");
     res.json(result);
   } catch (err) {
@@ -180,7 +194,7 @@ app.post("/exec/langfuse", async (req, res) => {
       log,
       "exec_langfuse_error",
       err instanceof Error ? err.message : String(err),
-      thorIds(req),
+      kallyIds(req),
     );
     res.status(500).json({ stdout: "", stderr: "Internal server error", exitCode: 1 });
   }
@@ -209,7 +223,7 @@ app.post("/exec/metabase", async (req, res) => {
     logInfo(log, "exec_metabase", {
       subcommand,
       ...(subcommand !== "query" && args[1] ? { schema: args[1] } : {}),
-      ...thorIds(req),
+      ...kallyIds(req),
     });
 
     let result: unknown;
@@ -232,7 +246,7 @@ app.post("/exec/metabase", async (req, res) => {
     res.json({ stdout: JSON.stringify(result, null, 2), stderr: "", exitCode: 0 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logError(log, "exec_metabase_error", message, thorIds(req));
+    logError(log, "exec_metabase_error", message, kallyIds(req));
     res.status(500).json({ stdout: "", stderr: message, exitCode: 1 });
   }
 });

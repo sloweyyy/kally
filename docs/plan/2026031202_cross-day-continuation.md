@@ -20,14 +20,14 @@ When a session from a previous day is triggered again today, `appendTrigger` and
 - Change `appendTrigger()` — write to `todayNotesPath()` directly, no-op if file missing
 - Change `appendSummary()` — write to `todayNotesPath()` directly, no-op if file missing
 - Use `appendFileSync` instead of read-then-write for append operations
-- Export `continueNotes` from `@thor/common`
+- Export `continueNotes` from `@kally/common`
 - Update runner: on resume, call `findNotesFile()` → `continueNotes()` instead of `appendTrigger()`
 - Add cross-day test suite (6 tests)
 
 **Exit criteria**:
 
 - All 22 tests pass (`pnpm vitest run packages/common/src/notes.test.ts`)
-- `@thor/common` type-checks clean (`pnpm --filter @thor/common typecheck`)
+- `@kally/common` type-checks clean (`pnpm --filter @kally/common typecheck`)
 - Old notes files are never modified on cross-day resume (verified by tests)
 
 ## Decision Log
