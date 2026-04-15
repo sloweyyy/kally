@@ -1,6 +1,6 @@
-# Thor
+# Kally
 
-An event-driven AI team member that monitors Slack, Atlassian, and PostHog, then takes action through OpenCode sessions with policy-enforced tool access.
+An event-driven AI team member that monitors Slack, GitHub, Atlassian, and PostHog, then takes action through OpenCode sessions with policy-enforced tool access.
 
 ## Architecture
 
@@ -28,28 +28,28 @@ An event-driven AI team member that monitors Slack, Atlassian, and PostHog, then
                  (hosted)   (hosted)     MCP       MCP
 ```
 
-Gateway receives events and triggers the runner. OpenCode connects to proxy instances for tool access and uses `remote-cli` for CLI-based integrations.
+Gateway receives events and triggers the runner. OpenCode connects to proxy instances for tool access and uses remote-cli for Git/GitHub CLI operations.
 
 ## Services
 
-| Service         | Port      | Package            | Role                                                                     |
-| --------------- | --------- | ------------------ | ------------------------------------------------------------------------ |
-| **cron**        | —         | `docker/cron`      | BusyBox crond for scheduled `hey-thor` prompts                           |
-| **data**        | 3080      | `docker/data`      | Nginx credential proxy for internal APIs (requires custom config)        |
-| **gateway**     | 3002      | `@thor/gateway`    | Slack webhook ingestion, event batching, trigger orchestration           |
-| **remote-cli**  | 3004      | `@thor/remote-cli` | Remote CLI gateway for CLI-based integrations                            |
-| **grafana-mcp** | 8000      | Docker image       | Grafana MCP server for Loki/Tempo queries                                |
-| **ingress**     | 8080      | `docker/ingress`   | Nginx reverse proxy with Vouch SSO                                       |
-| **opencode**    | 4096      | Docker image       | AI agent runtime (headless server)                                       |
-| **proxy**       | 3010–3013 | `@thor/proxy`      | MCP tool allow-listing, credential injection, audit logging              |
-| **runner**      | 3000      | `@thor/runner`     | OpenCode session management, prompt execution, NDJSON progress streaming |
-| **slack-mcp**   | 3003      | `@thor/slack-mcp`  | Slack API MCP server, progress message lifecycle                         |
-| **vouch**       | 9090      | Docker image       | OAuth/SSO authentication proxy (Vouch Proxy)                             |
+| Service         | Port      | Package             | Role                                                                     |
+| --------------- | --------- | ------------------- | ------------------------------------------------------------------------ |
+| **cron**        | —         | `docker/cron`       | BusyBox crond for scheduled `hey-kally` prompts                          |
+| **data**        | 3080      | `docker/data`       | Nginx credential proxy for internal APIs (requires custom config)        |
+| **gateway**     | 3002      | `@kally/gateway`    | Slack & GitHub webhook ingestion, event batching, trigger orchestration  |
+| **remote-cli**  | 3004      | `@kally/remote-cli` | Git/GitHub CLI proxy with PAT credential isolation                       |
+| **grafana-mcp** | 8000      | Docker image        | Grafana MCP server for Loki/Tempo queries                                |
+| **ingress**     | 8080      | `docker/ingress`    | Nginx reverse proxy with Vouch SSO                                       |
+| **opencode**    | 4096      | Docker image        | AI agent runtime (headless server)                                       |
+| **proxy**       | 3010–3013 | `@kally/proxy`      | MCP tool allow-listing, credential injection, audit logging              |
+| **runner**      | 3000      | `@kally/runner`     | OpenCode session management, prompt execution, NDJSON progress streaming |
+| **slack-mcp**   | 3003      | `@kally/slack-mcp`  | Slack API MCP server, progress message lifecycle                         |
+| **vouch**       | 9090      | Docker image        | OAuth/SSO authentication proxy (Vouch Proxy)                             |
 
 ## How It Works
 
-1. **Events arrive** — Slack mentions and cron schedules hit the gateway
-2. **Smart batching** — Events are queued per correlation key (e.g., Slack thread) with configurable delays (3s for mentions and engaged threads, immediate for cron). Non-mention Slack messages are only forwarded if Thor has already replied in the thread.
+1. **Events arrive** — Slack mentions, GitHub webhooks, and cron schedules hit the gateway
+2. **Smart batching** — Events are queued per correlation key (e.g., Slack thread) with configurable delays (3s for mentions and engaged threads, 60s for GitHub events, immediate for cron). Non-mention Slack messages are only forwarded if Kally has already replied in the thread.
 3. **Session continuity** — The runner maps correlation keys to persistent OpenCode sessions, resuming context across interactions
 4. **Policy-enforced tools** — OpenCode accesses integrations through proxy instances that enforce allow-lists and log every tool call
 5. **Progress visibility** — Tool activity streams back to Slack as live-updating progress messages that auto-clean when the bot replies
@@ -64,9 +64,23 @@ Gateway receives events and triggers the runner. OpenCode connects to proxy inst
 
 ### Running with Docker Compose
 
-Populate `.env` from `.env.example`, then start the stack:
-
 ```bash
+# Set required environment variables
+export ATLASSIAN_BASIC_AUTH=base64_encoded_email:token
+export GITHUB_PAT=github_pat_...
+export GRAFANA_SERVICE_ACCOUNT_TOKEN=glsa_...
+export GRAFANA_URL=https://your-instance.grafana.net
+export POSTHOG_API_KEY=phx_...
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_BOT_USER_ID=U...
+export SLACK_SIGNING_SECRET=...
+export VOUCH_DOMAINS=example.com
+export VOUCH_GOOGLE_CLIENT_ID=...
+export VOUCH_GOOGLE_CLIENT_SECRET=...
+export VOUCH_JWT_SECRET=...
+export VOUCH_WHITELIST=alice@example.com,bob@example.com
+
+# Start all services
 docker compose up --build -d
 
 # Verify health
@@ -81,7 +95,7 @@ docker compose down
 
 ### Deployment Configuration
 
-Thor ships with generic defaults. A new deployment needs the following configuration:
+Kally ships with generic defaults. A new deployment needs the following configuration:
 
 #### 1. Environment variables (`.env`)
 
@@ -92,19 +106,12 @@ Copy `.env.example` to `.env` and fill in:
 | `ATLASSIAN_BASIC_AUTH`              | Yes      | proxy         | Base64-encoded `email:api-token` for Atlassian API access        |
 | `CRON_SECRET`                       | Yes      | gateway, cron | Shared secret for cron endpoint auth                             |
 | `DATA_ROUTES`                       | No       | data          | Comma-separated list of data proxy routes (see below)            |
-| `GIT_USER_EMAIL`                    | No       | remote-cli    | Git author email (default: `thor@localhost`)                     |
-| `GIT_USER_NAME`                     | No       | remote-cli    | Git author name (default: `thor`)                                |
+| `GIT_USER_EMAIL`                    | No       | remote-cli    | Git author email (default: `kally@localhost`)                    |
+| `GIT_USER_NAME`                     | No       | remote-cli    | Git author name (default: `kally`)                               |
 | `GITHUB_PAT`                        | Yes      | remote-cli    | GitHub fine-grained PAT                                          |
 | `GRAFANA_SERVICE_ACCOUNT_TOKEN`     | Yes      | grafana-mcp   | Grafana service account token                                    |
 | `GRAFANA_URL`                       | Yes      | grafana-mcp   | Grafana instance URL                                             |
 | `INGRESS_PORT`                      | No       | ingress       | Host port (default: `8080`)                                      |
-| `LANGFUSE_HOST`                     | No       | remote-cli    | Langfuse host URL (default: `https://us.cloud.langfuse.com`)     |
-| `LANGFUSE_PUBLIC_KEY`               | No       | remote-cli    | Langfuse public key for read-only trace queries                  |
-| `LANGFUSE_SECRET_KEY`               | No       | remote-cli    | Langfuse secret key for read-only trace queries                  |
-| `METABASE_ALLOWED_SCHEMAS`          | No       | remote-cli    | Comma-separated schema allowlist for discovery filtering         |
-| `METABASE_API_KEY`                  | No       | remote-cli    | Metabase API key (must be scoped to read-only DB role)           |
-| `METABASE_DATABASE_ID`              | No       | remote-cli    | Metabase database ID to query                                    |
-| `METABASE_URL`                      | No       | remote-cli    | Metabase instance URL                                            |
 | `OPENCODE_CPU_LIMIT`                | No       | opencode      | CPU limit for OpenCode container (default: `3`)                  |
 | `OPENCODE_MEMORY_LIMIT`             | No       | opencode      | Memory limit for OpenCode container (default: `4g`)              |
 | `OPENCODE_URL`                      | No       | runner        | OpenCode server URL (default: `http://opencode:4096`)            |
@@ -124,7 +131,7 @@ Copy `.env.example` to `.env` and fill in:
 
 #### 2. Data proxy routes (`.env`)
 
-If you have internal APIs that Thor should access with injected credentials, add routes to `.env`:
+If you have internal APIs that Kally should access with injected credentials, add routes to `.env`:
 
 ```bash
 DATA_ROUTES=billing,analytics
@@ -139,7 +146,7 @@ The data container generates its nginx config from these vars at startup. When `
 
 #### 3. Agent context (OpenCode memory)
 
-The bundled agent prompt (`docker/opencode/config/agents/build.md`) contains only generic behavior rules — no team-specific context. Bundled investigation skills also live under `docker/opencode/config/skills/`. After starting Thor, open the OpenCode web UI and tell Thor about your team in conversation. Ask it to remember key facts — Thor writes them to its persistent memory directory automatically. Things to tell it:
+The bundled agent prompt (`docker/opencode/agents/build.md`) contains only generic behavior rules — no team-specific context. After starting Kally, open the OpenCode web UI and tell Kally about your team in conversation. Ask it to remember key facts — Kally writes them to its persistent memory directory automatically. Things to tell it:
 
 - Your team name, Slack bot ID, and key channel IDs
 - Team members — names, Slack IDs, GitHub usernames, and roles
@@ -148,22 +155,24 @@ The bundled agent prompt (`docker/opencode/config/agents/build.md`) contains onl
 
 #### 4. Source repos
 
-Exec into the remote-cli container to clone repos — this runs as the `thor` user with the correct PAT credentials, avoiding permission issues:
+Exec into the remote-cli container to clone repos — this runs as the `kally` user with the correct PAT credentials, avoiding permission issues:
 
 ```bash
 docker compose exec remote-cli git clone https://github.com/your-org/your-repo.git /workspace/repos/your-repo
 ```
 
-Repos in `/workspace/repos/` are mounted read-only into OpenCode. Thor creates worktrees under `/workspace/worktrees/` for code changes.
+Repos in `/workspace/repos/` are mounted read-only into OpenCode. Kally creates worktrees under `/workspace/worktrees/` for code changes.
 
 #### 5. Per-workspace MCP servers
 
-Slack is available globally (configured in the base `docker/opencode/config/opencode.json`). Other MCP servers are configured **per repo** via `.opencode/opencode.json` in the repo root.
+Slack is available globally (configured in the base `docker/opencode/opencode.json`). Other MCP servers are configured **per repo** via `.kally.opencode/opencode.json` in the repo root.
+
+If a repo has both `.opencode/` and `.kally.opencode/`, Kally merges them with `.kally.opencode/` taking precedence — so humans can use OpenCode normally while Kally gets its own config overlay. Similarly, if a repo has both `AGENTS.md` and `KALLY.md`, Kally loads `KALLY.md` and ignores `AGENTS.md`/`CLAUDE.md`.
 
 ```bash
 # Example: give a repo access to Atlassian and Grafana
-mkdir -p docker-volumes/workspace/repos/your-repo/.opencode
-cat > docker-volumes/workspace/repos/your-repo/.opencode/opencode.json << 'EOF'
+mkdir -p docker-volumes/workspace/repos/your-repo/.kally.opencode
+cat > docker-volumes/workspace/repos/your-repo/.kally.opencode/opencode.json << 'EOF'
 {
   "mcp": {
     "atlassian": {
@@ -190,11 +199,15 @@ Available MCP servers (all policy-proxied):
 | posthog   | `http://proxy:3011/mcp` | Product analytics           |
 | grafana   | `http://proxy:3013/mcp` | Loki/Tempo log queries      |
 
-OpenCode merges per-repo config with the global config. A repo without `.opencode/` gets only Slack.
+OpenCode merges per-repo config with the global config. A repo without `.kally.opencode/` gets only Slack.
 
-#### 6. Cron jobs (optional)
+#### 6. GitHub webhook setup
 
-Add scheduled prompts to `docker-volumes/workspace/cron/crontab`. Each line triggers Thor with a prompt on a schedule. See `docs/plan/2026031204_cron-triggers.md` for examples.
+Copy `docs/notify-kally.example.yml` to `.github/workflows/notify-kally.yml` in any source repository you want Kally to monitor. Add `KALLY_GATEWAY_URL` as a repository variable pointing to the gateway endpoint.
+
+#### 7. Cron jobs (optional)
+
+Add scheduled prompts to `docker-volumes/workspace/cron/crontab`. Each line triggers Kally with a prompt on a schedule. See `docs/plan/2026031204_cron-triggers.md` for examples.
 
 ## Development
 
@@ -224,7 +237,7 @@ pnpm format
 ### Project Structure
 
 ```
-thor/
+kally/
 ├── packages/
 │   ├── common/        # Shared: logging (pino), Zod schemas, worklog utilities
 │   ├── gateway/       # Webhook ingestion, event queue, trigger orchestration
@@ -277,7 +290,7 @@ Environment variables are documented in the Deployment Configuration section abo
 
 ## Security
 
-Thor runs an AI agent with access to external APIs, so security is enforced in layers — no single component is trusted in isolation.
+Kally runs an AI agent with access to external APIs, so security is enforced in layers — no single component is trusted in isolation.
 
 ### Credential Isolation
 
@@ -295,21 +308,22 @@ The proxy sits between OpenCode and every upstream MCP server. Each proxy instan
 - Tools not in the allow-list are **never listed** to OpenCode and **never executed**
 - Blocked calls return an error: `"Unknown tool: <name>"`
 - Policy drift detection at startup — if an allow-list entry doesn't match any upstream tool, the proxy warns (dev) or refuses to start (production)
-- remote-cli blocks `clone` and `init` commands server-side — Thor can only work with repos that an admin has explicitly cloned into `/workspace/repos/`. This prevents the agent from fetching arbitrary repositories that could contain malicious instructions or prompt injection in READMEs, issue templates, or commit messages
+- remote-cli blocks `clone` and `init` commands server-side — Kally can only work with repos that an admin has explicitly cloned into `/workspace/repos/`. This prevents the agent from fetching arbitrary repositories that could contain malicious instructions or prompt injection in READMEs, issue templates, or commit messages
 
 ### Webhook Authentication
 
 - **Slack** — HMAC-SHA256 signature verification using `crypto.timingSafeEqual` with configurable timestamp tolerance (default 300s)
+- **GitHub** — Events are delivered via GitHub Actions workflow (`notify-kally.example.yml`), not direct webhooks, so payloads arrive from a trusted CI context
 
 ### SSO and Access Control
 
 - **Vouch Proxy** — Google OAuth SSO in front of OpenCode's web UI
 - **Nginx ingress** — `auth_request` directive validates sessions via Vouch; unauthenticated users are redirected to login
-- **Unprotected paths** — Only `/slack/*` (webhook endpoint with its own auth) and static assets bypass SSO
+- **Unprotected paths** — Only `/slack/*` and `/github/*` (webhook endpoints with their own auth) and static assets bypass SSO
 
 ### Non-Root Containers
 
-All custom-built containers run as a dedicated `thor` user (uid/gid 1001) instead of root. This limits the blast radius if a container is compromised — the process cannot modify system files, install packages, or escalate privileges. The only exception is the cron container, which requires root for `crond`.
+All custom-built containers run as a dedicated `kally` user (uid/gid 1001) instead of root. This limits the blast radius if a container is compromised — the process cannot modify system files, install packages, or escalate privileges. The only exception is the cron container, which requires root for `crond`.
 
 ### Network Isolation
 
@@ -341,7 +355,7 @@ Each record includes: tool name, decision (`allowed`/`blocked`), arguments (trun
 
 Zod schemas validate requests at every service boundary:
 
-- Gateway validates Slack event envelopes before processing
+- Gateway validates Slack event envelopes and GitHub payloads before processing
 - Runner validates trigger requests (`prompt`, `correlationKey`, `sessionId`)
 - slack-mcp enforces upper bounds on thread reads (200 replies), channel history (100 messages), and file downloads (20MB)
 - Progress events from the runner are validated against a discriminated union schema before forwarding

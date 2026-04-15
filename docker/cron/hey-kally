@@ -9,18 +9,18 @@ while [ $# -gt 1 ]; do
   esac
 done
 
-[ -z "$1" ] && { echo "Usage: hey-thor [--key <key>] '<prompt>'"; exit 1; }
+[ -z "$1" ] && { echo "Usage: hey-kally [--key <key>] '<prompt>'"; exit 1; }
 
-echo "[hey-thor] prompt length: ${#1}"
-echo "[hey-thor] prompt preview: $(printf '%.80s' "$1")..."
+echo "[hey-kally] prompt length: ${#1}"
+echo "[hey-kally] prompt preview: $(printf '%.80s' "$1")..."
 
 DIR=$(printf '%s' "$PWD" | jq -Rs .)
 PROMPT=$(printf '%s' "$1" | jq -Rs .)
 JSON="{\"prompt\":${PROMPT},\"directory\":${DIR}}"
 [ -n "$KEY" ] && JSON="{\"prompt\":${PROMPT},\"correlationKey\":$(printf '%s' "$KEY" | jq -Rs .),\"directory\":${DIR}}"
 
-echo "[hey-thor] json length: ${#JSON}"
-echo "[hey-thor] posting to ${GATEWAY_URL}/cron"
+echo "[hey-kally] json length: ${#JSON}"
+echo "[hey-kally] posting to ${GATEWAY_URL}/cron"
 
 printf '%s' "$JSON" | curl -v -X POST "${GATEWAY_URL}/cron" \
   -H "Content-Type: application/json" \
@@ -28,4 +28,4 @@ printf '%s' "$JSON" | curl -v -X POST "${GATEWAY_URL}/cron" \
   -d @- 2>&1
 
 echo ""
-echo "[hey-thor] exit code: $?"
+echo "[hey-kally] exit code: $?"

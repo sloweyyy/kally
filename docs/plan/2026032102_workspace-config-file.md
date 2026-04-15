@@ -1,6 +1,6 @@
 # Workspace Config File
 
-Replace env-var-based repo/channel configuration with a single JSON config file (`/workspace/repos.json`) parsed by a shared zod schema in `@thor/common`.
+Replace env-var-based repo/channel configuration with a single JSON config file (`/workspace/repos.json`) parsed by a shared zod schema in `@kally/common`.
 
 ## Motivation
 
@@ -8,7 +8,7 @@ The current approach uses three env vars (`SLACK_CHANNEL_REPOS`, `SLACK_ALLOWED_
 
 ## Phases
 
-### Phase 1: Config schema and parser in `@thor/common`
+### Phase 1: Config schema and parser in `@kally/common`
 
 **What:**
 
@@ -78,25 +78,25 @@ The current approach uses three env vars (`SLACK_CHANNEL_REPOS`, `SLACK_ALLOWED_
 
 ## Decision Log
 
-| #   | Decision                                          | Reason                                                                                                                                                |
-| --- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | JSON file at `/workspace/repos.json`              | Already mounted via `./docker-volumes/workspace:/workspace`. No new volume needed.                                                                    |
-| 2   | Zod schema in `@thor/common`                      | Both gateway and runner depend on common. Single source of truth for validation.                                                                      |
-| 3   | Fail fast on invalid config                       | Better to crash at startup than silently misbehave.                                                                                                   |
-| 4   | Detect duplicate channel IDs                      | One channel mapping to two repos is always a bug. Catch it early.                                                                                     |
-| 5   | `defaultDirectory` is optional                    | Defaults to `/workspace` if omitted. Keeps minimal configs minimal.                                                                                   |
-| 6   | Warn + drop at resolve time for missing repo dirs | Repos may be cloned after container starts. Don't crash at startup, but don't forward events to a non-existent directory either.                      |
-| 7   | Validate directory paths against allowed prefixes | Prevents path traversal attacks via crafted webhook payloads. Runner normalizes and checks against `/workspace/repos/` and `/workspace/worktrees/`.   |
-| 8   | Per-repo MCP via `.thor.opencode/`                | Forked OpenCode natively resolves `.thor.opencode/opencode.json` from the working directory. Slack stays global; other MCP servers are per-workspace. |
-| 9   | Slack in global config only                       | Global `opencode.json` sets model + permission + Slack MCP. Other servers configured per workspace so repos only get the tools they need.             |
+| #   | Decision                                          | Reason                                                                                                                                                 |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | JSON file at `/workspace/repos.json`              | Already mounted via `./docker-volumes/workspace:/workspace`. No new volume needed.                                                                     |
+| 2   | Zod schema in `@kally/common`                     | Both gateway and runner depend on common. Single source of truth for validation.                                                                       |
+| 3   | Fail fast on invalid config                       | Better to crash at startup than silently misbehave.                                                                                                    |
+| 4   | Detect duplicate channel IDs                      | One channel mapping to two repos is always a bug. Catch it early.                                                                                      |
+| 5   | `defaultDirectory` is optional                    | Defaults to `/workspace` if omitted. Keeps minimal configs minimal.                                                                                    |
+| 6   | Warn + drop at resolve time for missing repo dirs | Repos may be cloned after container starts. Don't crash at startup, but don't forward events to a non-existent directory either.                       |
+| 7   | Validate directory paths against allowed prefixes | Prevents path traversal attacks via crafted webhook payloads. Runner normalizes and checks against `/workspace/repos/` and `/workspace/worktrees/`.    |
+| 8   | Per-repo MCP via `.kally.opencode/`               | Forked OpenCode natively resolves `.kally.opencode/opencode.json` from the working directory. Slack stays global; other MCP servers are per-workspace. |
+| 9   | Slack in global config only                       | Global `opencode.json` sets model + permission + Slack MCP. Other servers configured per workspace so repos only get the tools they need.              |
 
 ## Per-repo MCP configuration
 
-MCP servers are configured per repo using `.thor.opencode/opencode.json` in the repo root. The forked OpenCode natively looks for this directory in the working directory and merges it with the global config when a session starts.
+MCP servers are configured per repo using `.kally.opencode/opencode.json` in the repo root. The forked OpenCode natively looks for this directory in the working directory and merges it with the global config when a session starts.
 
-**Override semantics:** If a repo has both `.opencode/` and `.thor.opencode/`, Thor merges them with `.thor.opencode/` values taking precedence. This lets humans use OpenCode normally with `.opencode` while Thor gets its own config overlay. For agent instructions, if a repo has both `AGENTS.md` and `THOR.md`, Thor loads `THOR.md` first and ignores `AGENTS.md`/`CLAUDE.md`.
+**Override semantics:** If a repo has both `.opencode/` and `.kally.opencode/`, Kally merges them with `.kally.opencode/` values taking precedence. This lets humans use OpenCode normally with `.opencode` while Kally gets its own config overlay. For agent instructions, if a repo has both `AGENTS.md` and `KALLY.md`, Kally loads `KALLY.md` first and ignores `AGENTS.md`/`CLAUDE.md`.
 
-Slack is always available globally. Example `.thor.opencode/opencode.json` for a repo that also needs Atlassian and Grafana:
+Slack is always available globally. Example `.kally.opencode/opencode.json` for a repo that also needs Atlassian and Grafana:
 
 ```json
 {

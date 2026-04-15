@@ -165,7 +165,7 @@ The runner derives the notification target from the correlation key it already h
 ```jsonc
 // runner or gateway config
 {
-  "fallbackApprovalChannel": "#thor-approvals",
+  "fallbackApprovalChannel": "#kally-approvals",
 }
 ```
 

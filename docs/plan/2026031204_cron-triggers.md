@@ -4,7 +4,7 @@
 
 ## Context
 
-Thor is event-driven: Slack mentions and GitHub webhooks enter via the gateway, get enqueued in the EventQueue with a correlation key and batch delay, and are dispatched to the runner. The mvp.md spec defines cron as a third trigger source with:
+Kally is event-driven: Slack mentions and GitHub webhooks enter via the gateway, get enqueued in the EventQueue with a correlation key and batch delay, and are dispatched to the runner. The mvp.md spec defines cron as a third trigger source with:
 
 - Correlation key format: `cron:{md5(prompt)}:{epoch}` — each invocation gets a unique session
 - **Immediate** debounce (no batching — each tick is a standalone event)
@@ -25,9 +25,9 @@ This plan adds a `POST /cron` HTTP endpoint to the gateway. Scheduling runs in a
 | D7  | **No `--slack` flag — prompt instructs the agent**           | The prompt itself tells the agent where to post results (Slack, Jira, etc.) via MCP tools. No special gateway plumbing for output routing.                                                                                                           |
 | D8  | **`CRON_SECRET` required — fail fast if unset**              | `POST /cron` always requires `Authorization: Bearer <CRON_SECRET>`. If the env var is not configured, the endpoint returns 401 immediately. No permissive mode.                                                                                      |
 | D9  | **Crontab on shared volume, not baked into image**           | `docker-volumes/workspace/cron/` is mounted **rw in OpenCode** and **ro in the cron container**. OpenCode can add/edit/remove jobs at runtime. ~~BusyBox crond re-reads the crontab every wake cycle — no reload signal needed.~~ Superseded by D11. |
-| D10 | **`hey-thor` CLI baked into image, not on volume**           | The CLI is stable infrastructure; the crontab is the dynamic part. CLI in image, config on volume.                                                                                                                                                   |
+| D10 | **`hey-kally` CLI baked into image, not on volume**          | The CLI is stable infrastructure; the crontab is the dynamic part. CLI in image, config on volume.                                                                                                                                                   |
 | D11 | **Switch from BusyBox crond to supercronic**                 | [supercronic](https://github.com/aptible/supercronic) is designed for containers: no spool directory, no root required, watches crontab via inotify for instant reload. Replaces `crond -f` and the poll-based entrypoint.                           |
-| D12 | **Run as non-root (`USER thor`)**                            | supercronic doesn't need root. Dockerfile creates `thor` (UID 1001) and switches to it before entrypoint. Reduces container attack surface.                                                                                                          |
+| D12 | **Run as non-root (`USER kally`)**                           | supercronic doesn't need root. Dockerfile creates `kally` (UID 1001) and switches to it before entrypoint. Reduces container attack surface.                                                                                                         |
 
 ## Phases
 
@@ -93,9 +93,9 @@ Steps:
 
 ---
 
-### Phase 3 — `hey-thor` CLI + cron container
+### Phase 3 — `hey-kally` CLI + cron container
 
-**Goal**: Create a `hey-thor` bash CLI that wraps the `POST /cron` call, so the crontab reads like config. Set up a lightweight cron container with volume-mounted config that OpenCode can edit at runtime.
+**Goal**: Create a `hey-kally` bash CLI that wraps the `POST /cron` call, so the crontab reads like config. Set up a lightweight cron container with volume-mounted config that OpenCode can edit at runtime.
 
 #### Volume layout
 
@@ -111,12 +111,12 @@ Mount permissions:
 
 ~~BusyBox crond re-reads the crontab on every wake cycle — no reload needed. OpenCode edits the file, next minute tick picks it up.~~ Superseded by D11 — supercronic watches via inotify.
 
-#### `hey-thor` CLI
+#### `hey-kally` CLI
 
-A shell script baked into the cron image at `/usr/local/bin/hey-thor`:
+A shell script baked into the cron image at `/usr/local/bin/hey-kally`:
 
 ```
-hey-thor "<prompt>"
+hey-kally "<prompt>"
 ```
 
 Behavior:
@@ -130,21 +130,21 @@ Behavior:
 `docker-volumes/workspace/cron/crontab` — clean, readable:
 
 ```crontab
-0 */6 * * *  hey-thor "Check PostHog for error rate spikes in the last 6 hours. ... Post findings to #acme-general on Slack."
-0 9 * * 1-5  hey-thor "Generate a daily codebase health digest: ... Post a concise summary to #acme-general on Slack."
+0 */6 * * *  hey-kally "Check PostHog for error rate spikes in the last 6 hours. ... Post findings to #acme-general on Slack."
+0 9 * * 1-5  hey-kally "Generate a daily codebase health digest: ... Post a concise summary to #acme-general on Slack."
 ```
 
 #### Container
 
 `docker/cron/Dockerfile` — ~~alpine + curl + jq + crond~~ alpine + curl + jq + supercronic (D11):
 
-- Copies `hey-thor` to `/usr/local/bin/` (baked into image)
+- Copies `hey-kally` to `/usr/local/bin/` (baked into image)
 - ~~Entrypoint: installs `/workspace/cron/crontab` into crond, then runs `crond -f` (foreground)~~ Entrypoint: `exec supercronic -inotify /workspace/cron/crontab` (D11)
-- ~~Crontab is re-read from the volume on each wake — no image rebuild to change schedule~~ Crontab changes detected instantly via inotify (D11), runs as non-root `thor` user (D12)
+- ~~Crontab is re-read from the volume on each wake — no image rebuild to change schedule~~ Crontab changes detected instantly via inotify (D11), runs as non-root `kally` user (D12)
 
 Steps:
 
-1. Create `docker/cron/hey-thor` shell script
+1. Create `docker/cron/hey-kally` shell script
 2. ~~Create `docker/cron/entrypoint.sh` — installs crontab from volume, starts crond~~ Create `docker/cron/entrypoint.sh` — runs supercronic (D11)
 3. Create `docker/cron/Dockerfile`
 4. Seed initial crontab in `docker-volumes/workspace/cron/crontab`
@@ -173,7 +173,7 @@ Steps:
 
 **Exit criteria**:
 
-- `hey-thor "Check for errors and post to #acme-general on Slack"` triggers a full cron run end-to-end
+- `hey-kally "Check for errors and post to #acme-general on Slack"` triggers a full cron run end-to-end
 - Cron container starts and runs jobs on schedule
 - OpenCode can edit `/workspace/cron/crontab` and changes take effect within 1 minute
 - Adding a new job = one crontab line (no rebuild, no extra files)
@@ -182,20 +182,20 @@ Steps:
 
 ## Example Schedules
 
-The crontab at `docker-volumes/workspace/cron/crontab` is the single source of truth. Each line is a standard cron expression followed by a `hey-thor` invocation. Available upstream MCP servers via proxy: **GitHub** (port 3013), **Atlassian** (port 3010), **PostHog** (port 3011), **Slack** (port 3012), **Git** (port 3014).
+The crontab at `docker-volumes/workspace/cron/crontab` is the single source of truth. Each line is a standard cron expression followed by a `hey-kally` invocation. Available upstream MCP servers via proxy: **GitHub** (port 3013), **Atlassian** (port 3010), **PostHog** (port 3011), **Slack** (port 3012), **Git** (port 3014).
 
 ```crontab
 # ── Daily Brief (weekdays 9:15 AM VN time / 2:15 UTC) ──────────────────────
-15 2 * * 1-5  hey-thor "Generate a Daily Brief for the Acme team. Include: (1) What shipped — list PRs merged in acme/acme-project in the last 24h with PR number, title, and author. (2) Heads up — find Jira issues in the Acme project that are urgent or due within 3 days but still in Backlog/Todo; flag open PRs older than 2 days with no review. (3) Action items — based on overdue issues and stale PRs, tag the assignee with specific asks. (4) Product pulse — query PostHog for yesterday's visitor count, signup count, execution count, and agent completion rate; compare to the day before and show trend arrows. (5) Quick wins — small PRs (<100 lines) ready for review. Format with Slack mrkdwn, use emoji section headers. Keep it to one concise message. Post to #acme-general on Slack."
+15 2 * * 1-5  hey-kally "Generate a Daily Brief for the Acme team. Include: (1) What shipped — list PRs merged in acme/acme-project in the last 24h with PR number, title, and author. (2) Heads up — find Jira issues in the Acme project that are urgent or due within 3 days but still in Backlog/Todo; flag open PRs older than 2 days with no review. (3) Action items — based on overdue issues and stale PRs, tag the assignee with specific asks. (4) Product pulse — query PostHog for yesterday's visitor count, signup count, execution count, and agent completion rate; compare to the day before and show trend arrows. (5) Quick wins — small PRs (<100 lines) ready for review. Format with Slack mrkdwn, use emoji section headers. Keep it to one concise message. Post to #acme-general on Slack."
 
 # ── Error Spike Monitor (every 6 hours) ─────────────────────────────────────
-0 */6 * * *  hey-thor "Check PostHog for error rate spikes in the last 6 hours. If any endpoint shows >20% increase in error rate, investigate recent GitHub merges in acme/acme-project for likely causes. Post findings with links to the relevant PRs and PostHog error details to #acme-general on Slack."
+0 */6 * * *  hey-kally "Check PostHog for error rate spikes in the last 6 hours. If any endpoint shows >20% increase in error rate, investigate recent GitHub merges in acme/acme-project for likely causes. Post findings with links to the relevant PRs and PostHog error details to #acme-general on Slack."
 
 # ── Stale PR Reminder (weekdays 4 PM VN time / 9:00 UTC) ────────────────────
-0 9 * * 1-5  hey-thor "Find all open PRs in acme/acme-project that have had no review activity in the last 48 hours. For each, mention the PR author and requested reviewers. Sort by age, oldest first. Post to #acme-general on Slack."
+0 9 * * 1-5  hey-kally "Find all open PRs in acme/acme-project that have had no review activity in the last 48 hours. For each, mention the PR author and requested reviewers. Sort by age, oldest first. Post to #acme-general on Slack."
 
 # ── Weekly Initiative Health (Monday 9:30 AM VN / 2:30 UTC) ─────────────────
-30 2 * * 1  hey-thor "Generate a weekly initiative health report. For each active Jira initiative in the Acme project: show % complete, issues closed vs remaining this week, and any blockers. Cross-reference with GitHub — flag initiatives where no PRs were merged in the past 7 days. Post to #acme-general on Slack."
+30 2 * * 1  hey-kally "Generate a weekly initiative health report. For each active Jira initiative in the Acme project: show % complete, issues closed vs remaining this week, and any blockers. Cross-reference with GitHub — flag initiatives where no PRs were merged in the past 7 days. Post to #acme-general on Slack."
 ```
 
 ### Prompt Design Guidelines
@@ -212,7 +212,7 @@ The crontab at `docker-volumes/workspace/cron/crontab` is the single source of t
 
 - **In-process scheduler** — scheduling is the platform's job, not ours
 - **Job registry or CRUD API** — jobs are defined in the crontab
-- **Prompt files** — prompts are inline in the crontab via `hey-thor`
+- **Prompt files** — prompts are inline in the crontab via `hey-kally`
 - **Distributed scheduling / leader election** — single cron container assumed
 - **Job history / run tracking UI** — worklog notes are sufficient for now
 - **Retry on failure** — if the gateway is down, the cron tick is lost (acceptable for MVP; platform-level retry can be added later)
@@ -222,7 +222,7 @@ The crontab at `docker-volumes/workspace/cron/crontab` is the single source of t
 
 | Dependency         | Version | Purpose                   | Status   |
 | ------------------ | ------- | ------------------------- | -------- |
-| `@thor/common`     | —       | Logging, progress events  | Existing |
+| `@kally/common`    | —       | Logging, progress events  | Existing |
 | EventQueue         | —       | Event ingestion (gateway) | Existing |
 | Runner /trigger    | —       | Agent execution endpoint  | Existing |
 | alpine + curl + jq | —       | Cron container base       | System   |
