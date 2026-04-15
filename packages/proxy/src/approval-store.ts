@@ -20,6 +20,14 @@ const ApprovalActionSchema = z.object({
   args: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
   dateSegment: z.string(),
+  /** Slack user id of the person whose action triggered this approval.
+   *  Used at resolve-time to look up per-user creds from the vault so the
+   *  approved action authenticates AS THAT USER, not as the reviewer and
+   *  not as the container's service account. Optional for backwards
+   *  compatibility with legacy pending approvals that predate Phase 3. */
+  requester_uid: z.string().optional(),
+  /** Email of the requester, carried for audit + user-facing messages. */
+  requester_email: z.string().optional(),
   resolvedAt: z.string().optional(),
   reviewer: z.string().optional(),
   result: z.any().optional(),
@@ -36,8 +44,17 @@ export class ApprovalStore {
     private readonly fallbackDirs: string[] = [],
   ) {}
 
-  /** Create a pending approval action. Returns the action. */
-  create(tool: string, args: Record<string, unknown>): ApprovalAction {
+  /** Create a pending approval action. Returns the action.
+   *
+   *  `requester` carries the Slack identity of the person whose intent the
+   *  action represents. At resolve time, the proxy fetches this user's vault
+   *  creds so the approved call authenticates AS THEM — not as the reviewer
+   *  and not as the container's shared creds. */
+  create(
+    tool: string,
+    args: Record<string, unknown>,
+    requester?: { uid?: string; email?: string },
+  ): ApprovalAction {
     const now = new Date();
     const action: ApprovalAction = {
       id: randomUUID(),
@@ -46,6 +63,8 @@ export class ApprovalStore {
       args,
       createdAt: now.toISOString(),
       dateSegment: now.toISOString().slice(0, 10),
+      ...(requester?.uid ? { requester_uid: requester.uid } : {}),
+      ...(requester?.email ? { requester_email: requester.email } : {}),
     };
     this.write(action);
     return action;

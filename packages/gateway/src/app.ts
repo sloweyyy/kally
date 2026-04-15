@@ -8,7 +8,7 @@ import {
   getAllowedChannelIds,
   getChannelRepoMap,
   type ConfigLoader,
-} from "@thor/common";
+} from "@kally/common";
 import { z } from "zod/v4";
 import { EventQueue, type QueuedEvent } from "./queue.js";
 import {
@@ -30,6 +30,21 @@ import {
   type SlackThreadEvent,
 } from "./slack.js";
 import { CronRequestSchema, deriveCronCorrelationKey, type CronPayload } from "./cron.js";
+import {
+  createSlackUserResolver,
+  nullSlackUserResolver,
+  type SlackUserResolver,
+} from "./slack-users.js";
+import {
+  createSlackWebClient,
+  handleSubmission,
+  openEnrollmentModal,
+  parseCommandText,
+  parseSlashCommand,
+  type SlackWebClient,
+} from "./enrollment.js";
+import type { VaultClient } from "@kally/common";
+import { invalidateProxyUserConnections } from "@kally/common";
 
 interface SlackQueuedEvent extends QueuedEvent<SlackThreadEvent> {
   source: "slack";
@@ -76,6 +91,16 @@ export interface GatewayAppConfig extends RunnerDeps {
   cronSecret?: string;
   /** Dynamic workspace config loader — re-reads config.json on each request. */
   getConfig?: ConfigLoader;
+  /** Resolves Slack user id → email. When unset, the null resolver is used
+   *  and triggers carry uid but no email. Requires Slack bot scope
+   *  `users:read.email`. */
+  userResolver?: SlackUserResolver;
+  /** Slack Web API client — used to open enrollment modals and DM users.
+   *  When unset, /slack/commands responds with an error message. */
+  slackWebClient?: SlackWebClient;
+  /** Vault client for credential enrollment. When unset, /slack/commands
+   *  rejects with a "vault not configured" message. */
+  vaultClient?: VaultClient;
 }
 
 const InteractivityBodySchema = z.object({
@@ -118,6 +143,9 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
     slackMcpUrl: config.slackMcpUrl,
     fetchImpl: config.fetchImpl,
   };
+  const userResolver: SlackUserResolver = config.userResolver ?? nullSlackUserResolver;
+  const slackWeb = config.slackWebClient;
+  const vault = config.vaultClient;
   const proxyHost = config.proxyHost ?? "proxy";
 
   const queue = new EventQueue({
@@ -143,6 +171,7 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
             ack,
             getChannelRepos(),
             reject,
+            userResolver,
           );
           if (result.busy) {
             logInfo(log, "slack_trigger_busy", {
@@ -337,7 +366,7 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
         logInfo(log, "corr_key_resolved", { rawKey, correlationKey });
       }
 
-      // Only forward if Thor is engaged in this thread (has notes with a
+      // Only forward if Kally is engaged in this thread (has notes with a
       // slack:thread canonical or alias). Users must @mention to start new conversations.
       const engaged = hasSlackReply(correlationKey);
       if (!engaged) {
@@ -467,7 +496,221 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
       }
     }
 
+    // Handle view_submission (modal save) for enrollment
+    if (result.success && result.data.type === "view_submission") {
+      if (!vault || !slackWeb) {
+        logError(log, "enrollment_not_configured", "vault or slack web client missing");
+        res.status(200).json({
+          response_action: "errors",
+          errors: { _: "Enrollment is not configured on this gateway." },
+        });
+        return;
+      }
+      // Re-parse because parseInteractivityPayload trims the view shape.
+      // The full shape carries state.values we need.
+      let payload: {
+        view: {
+          callback_id: string;
+          state?: { values?: Record<string, Record<string, { value?: string }>> };
+        };
+        user: { id: string };
+      };
+      try {
+        const raw = (req.body as { payload?: string }).payload;
+        if (typeof raw !== "string") throw new Error("missing payload");
+        payload = JSON.parse(raw);
+      } catch (err) {
+        logError(log, "view_submission_parse_failed", err);
+        res.status(200).json({});
+        return;
+      }
+
+      handleSubmission(payload, { vault, logger: log })
+        .then(async ({ response, dm }) => {
+          res.status(200).json(response);
+          // After a successful save, tell the proxy to drop any cached
+          // per-user upstream connections for this user so the next tool
+          // call uses the new credentials immediately.
+          if (dm) {
+            const proxyUrl = `http://${proxyHost}:${config.proxyPort ?? 3001}`;
+            const vaultToken = process.env.KALLY_VAULT_TOKEN || "";
+            await invalidateProxyUserConnections(
+              proxyUrl,
+              vaultToken,
+              payload.user.id,
+              config.fetchImpl,
+            );
+            await slackWeb.chatPostMessageDM(payload.user.id, dm.text);
+          }
+        })
+        .catch((err) => {
+          logError(log, "view_submission_handle_failed", err);
+          if (!res.headersSent) res.status(200).json({});
+        });
+      return;
+    }
+
     res.status(200).json({ ok: true, ignored: true, interactionType });
+  });
+
+  // --- Slash commands (enrollment entrypoint) ---
+
+  app.post("/slack/commands", (req: Request, res: Response) => {
+    const rawRequest = req as RawBodyRequest;
+    const signature = req.header("x-slack-signature");
+    const timestamp = req.header("x-slack-request-timestamp");
+
+    const verified = verifySlackSignature({
+      signingSecret: config.signingSecret,
+      rawBody: rawRequest.rawBody || "",
+      signature,
+      timestamp,
+      toleranceSeconds: config.timestampToleranceSeconds,
+    });
+    if (!verified) {
+      res.status(401).json({ error: "Invalid Slack signature" });
+      return;
+    }
+
+    const cmd = parseSlashCommand(req.body);
+    if (!cmd) {
+      res.status(200).json({ text: "Sorry, I couldn't parse that command." });
+      return;
+    }
+    logInfo(log, "slash_command", { command: cmd.command, text: cmd.text, user: cmd.user_id });
+
+    // /kally → show help
+    if (cmd.command !== "/kally") {
+      res.status(200).json({ text: `Unknown command: ${cmd.command}` });
+      return;
+    }
+
+    if (!slackWeb || !vault) {
+      res.status(200).json({
+        response_type: "ephemeral",
+        text:
+          "Enrollment isn't configured on this workspace yet. Ask the Kally admin to set " +
+          "`SLACK_BOT_TOKEN`, `KALLY_VAULT_URL`, and `KALLY_VAULT_TOKEN`.",
+      });
+      return;
+    }
+
+    const parsed = parseCommandText(cmd.text);
+
+    if (parsed.kind === "help") {
+      res.status(200).json({
+        response_type: "ephemeral",
+        text:
+          "*Kally commands*\n" +
+          "• `/kally connect salesforce` — save your Salesforce credentials\n" +
+          "• `/kally connect atlassian` — save your Atlassian credentials\n" +
+          "• `/kally connect` — pick a service\n" +
+          "• `/kally status` — show which services you've connected\n" +
+          "• `/kally disconnect <service>` — revoke your saved credentials",
+      });
+      return;
+    }
+
+    if (parsed.kind === "unknown") {
+      res.status(200).json({
+        response_type: "ephemeral",
+        text: `Unknown subcommand: \`${parsed.raw}\`. Try \`/kally help\`.`,
+      });
+      return;
+    }
+
+    if (parsed.kind === "status") {
+      // Must ACK within 3s, so the fetch goes through response_url.
+      res.status(200).send("");
+      void (async () => {
+        const list = await vault.listByUser(cmd.user_id);
+        const msg =
+          list.ok && list.providers.length > 0
+            ? "*Connected services*\n" +
+              list.providers
+                .map(
+                  (p) =>
+                    `• \`${p.provider}\` — connected ${new Date(p.created_at).toISOString().slice(0, 10)}` +
+                    (p.updated_at !== p.created_at
+                      ? `, last updated ${new Date(p.updated_at).toISOString().slice(0, 10)}`
+                      : ""),
+                )
+                .join("\n") +
+              "\n_To revoke: `/kally disconnect <service>`_"
+            : "You haven't connected any services yet. Run `/kally connect salesforce` or `/kally connect atlassian` to get started.";
+        try {
+          await (config.fetchImpl ?? fetch)(cmd.response_url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ response_type: "ephemeral", text: msg }),
+          });
+        } catch (err) {
+          logError(log, "status_respond_failed", err);
+        }
+      })();
+      return;
+    }
+
+    if (parsed.kind === "disconnect_picker") {
+      res.status(200).json({
+        response_type: "ephemeral",
+        text: "Which service do you want to disconnect? Run `/kally disconnect salesforce` or `/kally disconnect atlassian`.",
+      });
+      return;
+    }
+
+    if (parsed.kind === "disconnect") {
+      const provider = parsed.provider;
+      res.status(200).send("");
+      void (async () => {
+        const del = await vault.delete(cmd.user_id, provider);
+        if (del.ok) {
+          // Evict any cached per-user upstream connection so a later
+          // /kally connect or a fresh call doesn't reuse the old session.
+          const proxyUrl = `http://${proxyHost}:${config.proxyPort ?? 3001}`;
+          const vaultToken = process.env.KALLY_VAULT_TOKEN || "";
+          await invalidateProxyUserConnections(proxyUrl, vaultToken, cmd.user_id, config.fetchImpl);
+        }
+        const msg = del.ok
+          ? `✅ Your ${provider} credentials were removed from the vault. Run \`/kally connect ${provider}\` to re-enroll.`
+          : del.status === 404
+            ? `You don't have ${provider} credentials enrolled — nothing to disconnect.`
+            : `Couldn't remove ${provider} credentials: ${del.error ?? "unknown error"}. Try again shortly.`;
+        try {
+          await (config.fetchImpl ?? fetch)(cmd.response_url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ response_type: "ephemeral", text: msg }),
+          });
+        } catch (err) {
+          logError(log, "disconnect_respond_failed", err);
+        }
+      })();
+      return;
+    }
+
+    // parsed.kind === "connect" — acknowledge immediately and open the modal in the background.
+    res.status(200).send("");
+    void (async () => {
+      const result = await openEnrollmentModal(cmd, { slack: slackWeb, logger: log });
+      if (!result.ok) {
+        logError(log, "open_enrollment_modal_failed", result.error ?? "unknown");
+        if (cmd.response_url) {
+          try {
+            await (config.fetchImpl ?? fetch)(cmd.response_url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                response_type: "ephemeral",
+                text: `Couldn't open the enrollment modal: ${result.error}`,
+              }),
+            });
+          } catch {
+            // swallow — we've already told logs about it
+          }
+        }
+      }
+    })();
   });
 
   // --- Cron trigger ---

@@ -5,7 +5,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { createLogger, logInfo, logError } from "@thor/common";
+import { createLogger, logInfo, logError } from "@kally/common";
 
 const log = createLogger("proxy");
 
@@ -24,7 +24,7 @@ export async function connectUpstream(
   config: UpstreamConfig,
   onDisconnect?: () => void,
 ): Promise<UpstreamConnection> {
-  const client = new Client({ name: `thor-proxy-${name}`, version: "0.0.1" });
+  const client = new Client({ name: `kally-proxy-${name}`, version: "0.0.1" });
 
   const headers: Record<string, string> = {
     Accept: "application/json, text/event-stream",
