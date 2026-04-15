@@ -11,11 +11,11 @@
  *   node proxy-cli.mjs approval list                           # list pending
  *
  * Env:
- *   THOR_PROXY_URL — base URL of the proxy (e.g. http://proxy:3001)
+ *   KALLY_PROXY_URL — base URL of the proxy (e.g. http://proxy:3001)
  */
 
 import { z } from "zod/v4";
-import { ExecResultSchema } from "@thor/common";
+import { ExecResultSchema } from "@kally/common";
 
 // --- Response schemas (proxy-specific) ---
 
@@ -55,37 +55,43 @@ if (!command || (command !== "mcp" && command !== "approval")) {
   process.exit(1);
 }
 
-const proxyUrl = process.env.THOR_PROXY_URL;
+const proxyUrl = process.env.KALLY_PROXY_URL;
 if (!proxyUrl) {
-  process.stderr.write("THOR_PROXY_URL is not set\n");
+  process.stderr.write("KALLY_PROXY_URL is not set\n");
   process.exit(1);
 }
 
-const directory = process.env.THOR_OPENCODE_DIRECTORY;
+const directory = process.env.KALLY_OPENCODE_DIRECTORY;
 if (!directory) {
-  process.stderr.write("THOR_OPENCODE_DIRECTORY is not set — shell.env plugin may not be loaded\n");
+  process.stderr.write(
+    "KALLY_OPENCODE_DIRECTORY is not set — shell.env plugin may not be loaded\n",
+  );
   process.exit(1);
 }
 
-const sessionId = process.env.THOR_OPENCODE_SESSION_ID || "";
-const callId = process.env.THOR_OPENCODE_CALL_ID || "";
-const thorHeaders: Record<string, string> = {
-  "x-thor-directory": directory,
-  ...(sessionId && { "x-thor-session-id": sessionId }),
-  ...(callId && { "x-thor-call-id": callId }),
+const sessionId = process.env.KALLY_OPENCODE_SESSION_ID || "";
+const callId = process.env.KALLY_OPENCODE_CALL_ID || "";
+const userSlackId = process.env.KALLY_USER_SLACK_ID || "";
+const userEmail = process.env.KALLY_USER_EMAIL || "";
+const kallyHeaders: Record<string, string> = {
+  "x-kally-directory": directory,
+  ...(sessionId && { "x-kally-session-id": sessionId }),
+  ...(callId && { "x-kally-call-id": callId }),
+  ...(userSlackId && { "x-kally-user-slack-id": userSlackId }),
+  ...(userEmail && { "x-kally-user-email": userEmail }),
 };
 
 // --- HTTP helpers ---
 
 async function jsonGet(url: string) {
-  const res = await fetch(url, { headers: thorHeaders, signal: AbortSignal.timeout(120_000) });
+  const res = await fetch(url, { headers: kallyHeaders, signal: AbortSignal.timeout(120_000) });
   return { res, json: await res.json() };
 }
 
 async function jsonPost(url: string, payload: unknown) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...thorHeaders },
+    headers: { "Content-Type": "application/json", ...kallyHeaders },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(120_000),
   });
