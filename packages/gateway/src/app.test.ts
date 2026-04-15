@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConfigLoader, WorkspaceConfig } from "@thor/common";
+import type { ConfigLoader, WorkspaceConfig } from "@kally/common";
 import { createGatewayApp, type GatewayAppConfig } from "./app.js";
 import type { EventQueue } from "./queue.js";
 
@@ -29,8 +29,8 @@ function fakeConfigLoader(
 }
 
 let mockHasSlackReply = false;
-vi.mock("@thor/common", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@thor/common")>();
+vi.mock("@kally/common", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@kally/common")>();
   return {
     ...actual,
     resolveRepoDirectory: (repoName: string) => `/workspace/repos/${repoName}`,
@@ -222,6 +222,15 @@ describe("gateway", () => {
       expect(triggerCall).toBeDefined();
       const triggerBody = JSON.parse(String(triggerCall![1]?.body));
       expect(triggerBody.correlationKey).toBe("slack:thread:1710000000.001");
+      // Trace metadata carries the triggering user's identity and event source.
+      // user_email is omitted here because no resolver is wired in the test —
+      // the gateway degrades to uid-only. Phase 1 identity plumbing.
+      expect(triggerBody.metadata).toMatchObject({
+        event_source: "slack",
+        event_type: "app_mention",
+        channel_id: "C123",
+        user_id: "U123",
+      });
       const promptJson = triggerBody.prompt.split("\n\n").slice(1).join("\n\n");
       const promptPayload = JSON.parse(promptJson);
       expect(promptPayload.type).toBe("app_mention");
@@ -230,7 +239,7 @@ describe("gateway", () => {
     });
   });
 
-  it("ignores thread replies in unengaged threads (Thor has not replied)", async () => {
+  it("ignores thread replies in unengaged threads (Kally has not replied)", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     mockHasSlackReply = false;
 
@@ -270,7 +279,7 @@ describe("gateway", () => {
     });
   });
 
-  it("enqueues thread replies in engaged threads (Thor has replied before)", async () => {
+  it("enqueues thread replies in engaged threads (Kally has replied before)", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       // POST /trigger → 200 (fire-and-forget)
