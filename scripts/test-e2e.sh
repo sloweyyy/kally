@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end test for Thor.
+# End-to-end test for Kally.
 #
 # Tests the full chain: curl -> runner -> OpenCode service -> per-upstream proxies -> MCP servers
 #
@@ -22,7 +22,7 @@ SESSION_DIR="${SESSION_DIR:-/workspace/repos/e2e-test}"
 HOST_WORKSPACE="${HOST_WORKSPACE:-./docker-volumes/workspace}"
 mkdir -p "${HOST_WORKSPACE}/repos/e2e-test"
 MEMORY_DIR="${MEMORY_DIR:-${HOST_WORKSPACE}/memory}"
-CRON_SECRET="${CRON_SECRET:-$(docker exec thor-cron-1 printenv CRON_SECRET 2>/dev/null)}"
+CRON_SECRET="${CRON_SECRET:-$(docker exec kally-cron-1 printenv CRON_SECRET 2>/dev/null)}"
 
 passed=0
 failed=0
@@ -98,7 +98,7 @@ echo "=== Session Resume ==="
 CORR_KEY="e2e-test-$(date +%s)"
 
 # Generate a random phrase so the agent can only know it from trigger #1
-PHRASE="THOR$(date +%s | tail -c 6)"
+PHRASE="KALLY$(date +%s | tail -c 6)"
 
 # 2a. First trigger — tell the agent a phrase to remember
 echo "  Sending trigger #1 (new session — planting phrase: $PHRASE)..."
@@ -218,7 +218,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
       continue
     fi
     tools_json=$(curl -sf "$PROXY_URL/$upstream_name/tools" \
-      -H "x-thor-directory: $test_dir" 2>/dev/null || echo '{"tools":[]}')
+      -H "x-kally-directory: $test_dir" 2>/dev/null || echo '{"tools":[]}')
     found_tool=$(echo "$tools_json" | node -e "
       const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
       const t = (d.tools || []).find(t => t.classification === 'approve');
@@ -242,11 +242,11 @@ else
   echo "  Calling tool via proxy (expecting approval interception)..."
   call_raw=$(curl -sf -X POST "$PROXY_URL/$APPROVAL_UPSTREAM/tools/call" \
     -H 'Content-Type: application/json' \
-    -H "x-thor-directory: $APPROVAL_DIR" \
+    -H "x-kally-directory: $APPROVAL_DIR" \
     -d "{\"name\":\"$APPROVAL_TOOL\",\"arguments\":{}}" \
     2>/dev/null || echo '{}')
 
-  # Parse action ID — check stdout, stderr (thor:meta), and content (legacy MCP format)
+  # Parse action ID — check stdout, stderr (kally:meta), and content (legacy MCP format)
   action_id=$(echo "$call_raw" | node -e "
     const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
     const parts = [d.stdout || '', d.stderr || ''];
@@ -300,7 +300,7 @@ else
   echo "  Creating pending approval via proxy..."
   e2e_call_raw=$(curl -sf -X POST "$PROXY_URL/$APPROVAL_UPSTREAM/tools/call" \
     -H 'Content-Type: application/json' \
-    -H "x-thor-directory: $APPROVAL_DIR" \
+    -H "x-kally-directory: $APPROVAL_DIR" \
     -d "{\"name\":\"$APPROVAL_TOOL\",\"arguments\":{}}" \
     2>/dev/null || echo '{}')
 

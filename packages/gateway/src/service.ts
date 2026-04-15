@@ -6,10 +6,12 @@ import {
   truncate,
   ProgressEventSchema,
   resolveRepoDirectory,
-} from "@thor/common";
-import type { ProgressEvent } from "@thor/common";
+} from "@kally/common";
+import type { ProgressEvent, TraceMetadata } from "@kally/common";
 import { getSlackCorrelationKey, getSlackThreadTs, type SlackThreadEvent } from "./slack.js";
 import type { CronPayload } from "./cron.js";
+import type { SlackUserResolver } from "./slack-users.js";
+import { nullSlackUserResolver } from "./slack-users.js";
 
 const log = createLogger("gateway-service");
 
@@ -49,6 +51,7 @@ export async function triggerRunnerSlack(
   onAccepted?: () => void,
   channelRepos?: Map<string, string>,
   onRejected?: (reason: string) => void,
+  userResolver: SlackUserResolver = nullSlackUserResolver,
 ): Promise<TriggerResult> {
   if (events.length === 0) return { busy: false };
 
@@ -69,10 +72,24 @@ export async function triggerRunnerSlack(
     onRejected?.(`repo directory not found for ${repo}`);
     return { busy: false };
   }
+
+  // Resolve Slack user → email (best-effort, cached). Degrades to uid-only
+  // on missing scope, auth failure, or resolver not wired.
+  const triggeringUid = "user" in last ? last.user : undefined;
+  const user = triggeringUid ? await userResolver(triggeringUid) : undefined;
+  const metadata: TraceMetadata = {
+    repo,
+    event_source: "slack",
+    event_type: last.type,
+    channel_id: last.channel,
+    ...(triggeringUid ? { user_id: triggeringUid } : {}),
+    ...(user?.email ? { user_email: user.email } : {}),
+  };
+
   const response = await getFetch(deps.fetchImpl)(`${deps.runnerUrl}/trigger`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, correlationKey, interrupt, directory }),
+    body: JSON.stringify({ prompt, correlationKey, interrupt, directory, metadata }),
   });
 
   if (!response.ok) {
@@ -199,6 +216,13 @@ export async function triggerRunnerCron(
   onAccepted?: () => void,
   onRejected?: (reason: string) => void,
 ): Promise<TriggerResult> {
+  // Cron fires as a service-account identity (design doc open question 5).
+  // Phase 3 enforcement treats this as its own role, not "inherited from the
+  // person who wrote the crontab line."
+  const metadata: TraceMetadata = {
+    event_source: "cron",
+    user_id: "kally-cron",
+  };
   const response = await getFetch(deps.fetchImpl)(`${deps.runnerUrl}/trigger`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -207,6 +231,7 @@ export async function triggerRunnerCron(
       correlationKey,
       interrupt,
       directory: payload.directory,
+      metadata,
     }),
   });
 

@@ -27,11 +27,11 @@ OpenCode sessions have no custom metadata or tags — only `id`, `title`, and ti
 
 Steps:
 
-1. Add a `getSessionIdFromNotes(correlationKey)` function in `@thor/common/notes.ts`:
+1. Add a `getSessionIdFromNotes(correlationKey)` function in `@kally/common/notes.ts`:
    - Use `findNotesFile(correlationKey)` to locate the most recent notes file
    - Read the file and parse `Session ID: <id>` from the header
    - Return `sessionId` or `undefined`
-2. Add an `updateSessionId(correlationKey, newSessionId)` function in `@thor/common/notes.ts`:
+2. Add an `updateSessionId(correlationKey, newSessionId)` function in `@kally/common/notes.ts`:
    - Find the notes file, replace the `Session ID:` line with the new ID
    - Used when a stale session is replaced with a new one
 3. Update `runner/src/index.ts`:
@@ -89,5 +89,5 @@ Steps:
 
 | Dependency                 | Version | Purpose                       | Status   |
 | -------------------------- | ------- | ----------------------------- | -------- |
-| `@thor/common`             | —       | Notes utilities (extended)    | Existing |
+| `@kally/common`            | —       | Notes utilities (extended)    | Existing |
 | No new dependencies needed | —       | grep/tar are system utilities | —        |

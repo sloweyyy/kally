@@ -1,3 +1,5 @@
+<!-- /autoplan restore point: /Users/son.dao/.gstack/projects/scoutqa-dot-ai-kally/dynamic-config-autoplan-restore-20260401-065138.md -->
+
 # Dynamic Workspace Config
 
 Single `config.json` for the entire workspace — repos, channels, and MCP proxies. All config is dynamic (no restart required) except upstream connection details.
@@ -8,7 +10,7 @@ Config was scattered across `repos.json`, 4 `proxy.*.json` files, `PROXY_INSTANC
 
 ## Phase 1: Dynamic repo/channel config (done)
 
-Rename `repos.json` → `config.json`. Add `createConfigLoader` in `@thor/common` that re-reads the file on every call. Gateway and slack-mcp use it for channel allowlists. No caching — file is tiny.
+Rename `repos.json` → `config.json`. Add `createConfigLoader` in `@kally/common` that re-reads the file on every call. Gateway and slack-mcp use it for channel allowlists. No caching — file is tiny.
 
 ## Phase 2: Merge proxy config into `config.json`
 
@@ -140,7 +142,7 @@ Touch points:
 
 ### Per-repo MCP config update
 
-`.thor.opencode/opencode.json` uses name-based paths instead of port numbers:
+`.kally.opencode/opencode.json` uses name-based paths instead of port numbers:
 
 ```json
 {
@@ -183,7 +185,7 @@ proxy:
     - ./docker-volumes/workspace:/workspace
 ```
 
-### Schema update in `@thor/common`
+### Schema update in `@kally/common`
 
 Extend `WorkspaceConfigSchema`:
 
