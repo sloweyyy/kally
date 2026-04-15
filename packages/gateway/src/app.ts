@@ -306,13 +306,33 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
       return;
     }
 
-    // Block non-allowlisted channels
-    if (
-      "channel" in event &&
-      typeof event.channel === "string" &&
-      !isChannelAllowed(event.channel)
-    ) {
-      logInfo(log, "event_ignored_channel_not_allowed", { eventId, channel: event.channel });
+    // Channel allowlist — TEMPORARILY DISABLED.
+    // Kally now responds in any public / private channel it's been added to.
+    // Adding the bot (`/invite @Kally`) is a Slack-side act that already
+    // requires a workspace member to do it, so we rely on that as the
+    // implicit gate.
+    //
+    // To re-enable the explicit allowlist, uncomment this block and make
+    // sure every channel you want Kally to respond in is listed under
+    // `repos[*].channels` in docker-volumes/workspace/config.json.
+    //
+    // if (
+    //   "channel" in event &&
+    //   typeof event.channel === "string" &&
+    //   !isChannelAllowed(event.channel)
+    // ) {
+    //   logInfo(log, "event_ignored_channel_not_allowed", { eventId, channel: event.channel });
+    //   res.status(200).json({ ok: true, ignored: true });
+    //   return;
+    // }
+    void isChannelAllowed; // keep the helper referenced so TS doesn't complain
+
+    // DM channels (id starts with "D") stay ignored even with the public-
+    // channel allowlist off. DMs are 1:1 between a user and Kally; forcing
+    // the user to mention Kally in a shared channel keeps the audit trail
+    // honest. If DM support is wanted later, drop this block.
+    if ("channel" in event && typeof event.channel === "string" && event.channel.startsWith("D")) {
+      logInfo(log, "event_ignored_dm_channel", { eventId, channel: event.channel });
       res.status(200).json({ ok: true, ignored: true });
       return;
     }
