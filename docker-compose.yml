@@ -1,4 +1,4 @@
-# Thor — Docker Compose
+# Kally — Docker Compose
 #
 # Start:   docker compose up --build -d
 # Test:    ./scripts/test-e2e.sh
@@ -25,6 +25,27 @@ services:
       timeout: 3s
       retries: 10
 
+  salesforce-mcp:
+    build:
+      context: .
+      target: salesforce-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3005:3005"
+    environment:
+      - NODE_ENV=production
+      - SALESFORCE_CLIENT_ID=${SALESFORCE_CLIENT_ID}
+      - SALESFORCE_CLIENT_SECRET=${SALESFORCE_CLIENT_SECRET}
+      - SALESFORCE_USERNAME=${SALESFORCE_USERNAME}
+      - SALESFORCE_PASSWORD=${SALESFORCE_PASSWORD}
+      - SALESFORCE_INSTANCE_URL=${SALESFORCE_INSTANCE_URL}
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   remote-cli:
     build:
       context: .
@@ -34,8 +55,8 @@ services:
       - "127.0.0.1:3004:3004"
     environment:
       - NODE_ENV=production
-      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-thor@localhost}
-      - GIT_USER_NAME=${GIT_USER_NAME:-thor}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-kally@localhost}
+      - GIT_USER_NAME=${GIT_USER_NAME:-kally}
       - GITHUB_PAT=${GITHUB_PAT}
       - SCOUT_API_KEY=${SCOUT_API_KEY:-}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -46,7 +67,7 @@ services:
       - METABASE_DATABASE_ID=${METABASE_DATABASE_ID:-}
       - METABASE_ALLOWED_SCHEMAS=${METABASE_ALLOWED_SCHEMAS:-}
     volumes:
-      - ./docker-volumes/home/thor:/home/thor
+      - ./docker-volumes/home/kally:/home/kally
       - ./docker-volumes/workspace:/workspace
     healthcheck:
       test:
@@ -55,30 +76,54 @@ services:
       timeout: 3s
       retries: 10
 
-  grafana-mcp:
-    image: grafana/mcp-grafana:0.11.3
+  # grafana-mcp disabled for local dev — re-enable when GRAFANA_URL + token are real.
+  # grafana-mcp:
+  #   image: grafana/mcp-grafana:0.11.3
+  #   restart: unless-stopped
+  #   entrypoint:
+  #     [
+  #       "/app/mcp-grafana",
+  #       "-transport",
+  #       "streamable-http",
+  #       "-address",
+  #       "0.0.0.0:8000",
+  #       "-enabled-tools",
+  #       "datasource,loki,proxied",
+  #     ]
+  #   environment:
+  #     - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
+  #     - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "bash",
+  #         "-c",
+  #         "echo -e 'GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/8000",
+  #       ]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+
+  vault:
+    build:
+      context: .
+      target: vault
     restart: unless-stopped
-    entrypoint:
-      [
-        "/app/mcp-grafana",
-        "-transport",
-        "streamable-http",
-        "-address",
-        "0.0.0.0:8000",
-        "-enabled-tools",
-        "datasource,loki,proxied",
-      ]
+    # Internal-only — no host port mapping. Other services reach it as
+    # http://vault:3006 on the compose network. This is the main defense:
+    # vault is not exposed to the host, so only containers on the compose
+    # network can talk to it, and each call must still carry the bearer
+    # token (KALLY_VAULT_TOKEN).
     environment:
-      - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
-      - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
+      - NODE_ENV=production
+      - KALLY_VAULT_MASTER_KEY=${KALLY_VAULT_MASTER_KEY:?set KALLY_VAULT_MASTER_KEY}
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:?set KALLY_VAULT_TOKEN}
+    volumes:
+      - ./docker-volumes/workspace/vault:/workspace/vault
     healthcheck:
       test:
-        [
-          "CMD",
-          "bash",
-          "-c",
-          "echo -e 'GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/8000",
-        ]
+        ["CMD", "node", "-e", "fetch('http://localhost:3006/health').then(r=>{if(!r.ok)throw 1})"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -94,13 +139,18 @@ services:
       - NODE_ENV=production
       - POSTHOG_API_KEY=${POSTHOG_API_KEY}
       - ATLASSIAN_BASIC_AUTH=${ATLASSIAN_BASIC_AUTH}
+      - KALLY_VAULT_URL=http://vault:3006
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:-}
     volumes:
       - ./docker-volumes/workspace:/workspace
     depends_on:
       slack-mcp:
         condition: service_healthy
-      grafana-mcp:
+      salesforce-mcp:
         condition: service_healthy
+      # grafana-mcp disabled for local dev
+      # grafana-mcp:
+      #   condition: service_healthy
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>{if(!r.ok)throw 1})"]
@@ -137,12 +187,14 @@ services:
     working_dir: /workspace
     command: ["serve", "--port", "4096", "--hostname", "0.0.0.0"]
     volumes:
-      - ./docker-volumes/opencode:/home/thor/.local/share/opencode
+      - ./docker-volumes/opencode:/home/kally/.local/share/opencode
       - ./docker-volumes/workspace/memory:/workspace/memory
       - ./docker-volumes/workspace/repos:/workspace/repos:ro
       - ./docker-volumes/workspace/worklog:/workspace/worklog:ro
       - ./docker-volumes/workspace/cron:/workspace/cron
       - ./docker-volumes/workspace/worktrees:/workspace/worktrees
+      # Share host opencode auth (all providers: anthropic, openai, codex, google, etc.)
+      - ${HOME}/.local/share/opencode/auth.json:/home/kally/.local/share/opencode/auth.json
     depends_on:
       proxy:
         condition: service_healthy
@@ -172,6 +224,9 @@ services:
     environment:
       - NODE_ENV=production
       - OPENCODE_URL=http://opencode:4096
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
     volumes:
       - ./docker-volumes/workspace:/workspace
     depends_on:
@@ -188,8 +243,12 @@ services:
     environment:
       - NODE_ENV=production
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_BOT_USER_ID=${SLACK_BOT_USER_ID:?set SLACK_BOT_USER_ID}
       - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
+      - GIT_USER_NAME=${GIT_USER_NAME:-kally}
+      - KALLY_VAULT_URL=http://vault:3006
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:-}
     volumes:
       - ./docker-volumes/workspace:/workspace
     depends_on:
