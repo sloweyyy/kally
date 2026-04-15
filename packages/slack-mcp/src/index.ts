@@ -39,9 +39,23 @@ const PORT = parseInt(process.env.PORT || "3003", 10);
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const getConfig = createConfigLoader(WORKSPACE_CONFIG_PATH);
 
-/** Check channel allowlist dynamically — re-reads config.json on each request. */
-const isChannelAllowed = (channel: string): boolean =>
-  getAllowedChannelIds(getConfig()).has(channel);
+/**
+ * Channel allowlist — TEMPORARILY DISABLED to match the gateway-side gate
+ * being off. Slack's `/invite @Kally` is the implicit gate for now; any
+ * channel Kally has been added to can receive progress updates, reactions,
+ * and tool-initiated posts.
+ *
+ * To re-enable strict allow-listing, uncomment the original body below and
+ * remove the unconditional `return true`. The call sites (post_message,
+ * /progress, /reaction) are all still wired, so flipping this is a
+ * one-line change.
+ */
+const isChannelAllowed = (_channel: string): boolean => {
+  // return getAllowedChannelIds(getConfig()).has(_channel);
+  void getAllowedChannelIds;
+  void getConfig;
+  return true;
+};
 
 if (!SLACK_BOT_TOKEN) {
   logError(log, "missing_env", "SLACK_BOT_TOKEN is required");
