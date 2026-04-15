@@ -1,6 +1,6 @@
-# Thor — AI Team Member Architecture
+# Kally — AI Team Member Architecture
 
-> **Scope**: Thor is an AI team member for the Acme team — covering both product and engineering responsibilities to help human members deliver work faster. It is **not** an extension of Acme's production architecture (EKS, Mastra, AG-UI). Alignment with production infrastructure is welcome but not required.
+> **Scope**: Kally is an AI team member for the Acme team — covering both product and engineering responsibilities to help human members deliver work faster. It is **not** an extension of Acme's production architecture (EKS, Mastra, AG-UI). Alignment with production infrastructure is welcome but not required.
 
 ## Core Topology
 
@@ -51,15 +51,15 @@ flowchart LR
 
 # Policy Proxy
 
-The proxy is an MCP server toward Thor and an MCP client toward downstream integrations. It enforces policy, logs all tool activity, and manages approval workflows.
+The proxy is an MCP server toward Kally and an MCP client toward downstream integrations. It enforces policy, logs all tool activity, and manages approval workflows.
 
 Each tool call is evaluated as one of:
 
 - **Allow** — forwarded immediately
 - **Block** — rejected with a policy message
-- **Approval Required** — stored in a queue, Thor receives an action ID with pending status and is **not blocked**
+- **Approval Required** — stored in a queue, Kally receives an action ID with pending status and is **not blocked**
 
-For approval, the proxy sends a Slack notification via the Slack MCP server. Once resolved, the proxy executes or discards the request. Thor will be notified once approved/rejected. In rare cases, Thor can choose to poll the action ID and wait for the outcome.
+For approval, the proxy sends a Slack notification via the Slack MCP server. Once resolved, the proxy executes or discards the request. Kally will be notified once approved/rejected. In rare cases, Kally can choose to poll the action ID and wait for the outcome.
 
 Approval is typically required for: PR creation, issue modifications, Jira status updates, PostHog config changes, etc.
 
@@ -67,11 +67,11 @@ Approval is typically required for: PR creation, issue modifications, Jira statu
 
 # Triggers
 
-Thor is event-driven, not continuously running. All triggers flow into a **shared event bus** as structured events. The agent-runner consumes events and manages lifecycle. New trigger sources can be added by emitting events into the bus — no changes to Thor or the proxy required.
+Kally is event-driven, not continuously running. All triggers flow into a **shared event bus** as structured events. The agent-runner consumes events and manages lifecycle. New trigger sources can be added by emitting events into the bus — no changes to Kally or the proxy required.
 
 Initial trigger sources:
 
-- **Slack mention** — user @mentions Thor in a thread
+- **Slack mention** — user @mentions Kally in a thread
 - **Scheduled job** — cron tasks (e.g. PostHog error check every 6h)
 - **Approval resolution** — emits back into the originating session
 - **Webhook event** — external systems like Jira
@@ -128,7 +128,7 @@ worklog/
    └─ posthog-check-06h.md
 ```
 
-The agent-runner seeds each file with trigger context. Follow-up events append. Thor can update these files freely during a run.
+The agent-runner seeds each file with trigger context. Follow-up events append. Kally can update these files freely during a run.
 
 **Project knowledge** — The existing `docs/` directory and source code. Over time, worklog entries can be consolidated into `docs/`.
 
@@ -136,7 +136,7 @@ The agent-runner seeds each file with trigger context. Follow-up events append. 
 
 # Security
 
-- **Least privilege** — each component only holds the credentials it needs. Thor has no direct access to external APIs.
+- **Least privilege** — each component only holds the credentials it needs. Kally has no direct access to external APIs.
 - **Tool allowlisting** — the proxy controls which tools are exposed.
 - **Scoped credentials** — tokens pinned to specific repos, teams, or projects.
 - **Approval for writes** — mutating actions require human approval.
@@ -146,19 +146,19 @@ The agent-runner seeds each file with trigger context. Follow-up events append. 
 
 # Scenarios
 
-Three examples of how Thor contributes across product and engineering work.
+Three examples of how Kally contributes across product and engineering work.
 
 ### PR merges, errors spike 20 minutes later
 
-A scheduled job queries PostHog and notices a 40% error rate increase on `/api/execute`. Thor checks GitHub for recent merges, finds PR #1047 landed 20 minutes before the spike, and reads the diff. A changed import path matches the error stack trace. It drafts a one-line fix — the policy proxy holds the PR for approval and pings Slack. An engineer approves, the draft PR appears, and Thor posts a summary linking the PR, the PostHog chart, and the original merge.
+A scheduled job queries PostHog and notices a 40% error rate increase on `/api/execute`. Kally checks GitHub for recent merges, finds PR #1047 landed 20 minutes before the spike, and reads the diff. A changed import path matches the error stack trace. It drafts a one-line fix — the policy proxy holds the PR for approval and pings Slack. An engineer approves, the draft PR appears, and Kally posts a summary linking the PR, the PostHog chart, and the original merge.
 
-### Bug filed in Jira, Thor prepares context
+### Bug filed in Jira, Kally prepares context
 
-A new bug is filed in Jira. The webhook triggers Thor. It reads the issue description, searches the codebase for relevant files, checks git blame for recent changes in that area, and pulls related PostHog session data. It comments on the Jira issue with a summary: likely affected files, recent commits, and who last touched the code. No fix attempted — just triage prep that saves 15 minutes of context-gathering.
+A new bug is filed in Jira. The webhook triggers Kally. It reads the issue description, searches the codebase for relevant files, checks git blame for recent changes in that area, and pulls related PostHog session data. It comments on the Jira issue with a summary: likely affected files, recent commits, and who last touched the code. No fix attempted — just triage prep that saves 15 minutes of context-gathering.
 
 ### Daily codebase health digest
 
-A daily cron job has Thor review open PRs older than 5 days, Jira issues marked "in progress" with no linked PR, and CI runs with increasing flakiness. It posts a morning summary to Slack: "3 stale PRs, 2 issues with no linked code, `auth.test.ts` has failed 4 of the last 10 runs." This is the product side of its role — tracking delivery health so the team can act on it.
+A daily cron job has Kally review open PRs older than 5 days, Jira issues marked "in progress" with no linked PR, and CI runs with increasing flakiness. It posts a morning summary to Slack: "3 stale PRs, 2 issues with no linked code, `auth.test.ts` has failed 4 of the last 10 runs." This is the product side of its role — tracking delivery health so the team can act on it.
 
 ---
 

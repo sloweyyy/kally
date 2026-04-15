@@ -24,7 +24,7 @@ Instructions for AI agents working on this repository.
 ## Repository Structure
 
 ```
-thor/
+kally/
 ├── AGENTS.md                  # This file
 ├── docs/
 │   ├── feat/                  # Feature specs and architecture
