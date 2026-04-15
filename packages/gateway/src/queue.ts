@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { createLogger, logError, logInfo } from "@thor/common";
+import { createLogger, logError, logInfo } from "@kally/common";
 
 const log = createLogger("event-queue");
 

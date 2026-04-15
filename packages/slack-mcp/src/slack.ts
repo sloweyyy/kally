@@ -1,4 +1,11 @@
 import { WebClient, type FilesInfoResponse } from "@slack/web-api";
+import { createRequire } from "node:module";
+import AdmZip from "adm-zip";
+
+// pdf-parse v2+ is CJS-only; load via createRequire to work from ESM.
+const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pdfParse: (buf: Buffer) => Promise<any> = require("pdf-parse");
 
 export type SlackDeps = {
   client: WebClient;
@@ -19,25 +26,107 @@ const TEXT_MIME_TYPES = new Set([
   "application/x-typescript",
   "application/yaml",
   "application/x-yaml",
+  "application/x-sh",
+  "application/x-shellscript",
+  "application/sql",
+  "application/x-sql",
+  "application/x-httpd-php",
+  "application/graphql",
+  "application/x-python-code",
+  "application/toml",
+  "application/x-toml",
 ]);
 
 const TEXT_FILE_TYPES = new Set([
+  // Plain text / docs
   "txt",
   "text",
   "md",
   "markdown",
+  "rst",
+  "asciidoc",
+  "adoc",
+  // Data / config
   "csv",
+  "tsv",
   "json",
+  "jsonl",
+  "ndjson",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "env",
+  "properties",
+  "cfg",
+  "conf",
+  "plist",
+  // Web / markup
+  "html",
+  "htm",
+  "xhtml",
+  "xml",
+  "svg",
+  "css",
+  "scss",
+  "less",
+  // Scripts / code
   "js",
+  "mjs",
+  "cjs",
   "ts",
   "tsx",
   "jsx",
-  "yaml",
-  "yml",
+  "vue",
+  "svelte",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "groovy",
+  "kt",
+  "kts",
+  "scala",
+  "c",
+  "cpp",
+  "cc",
+  "h",
+  "hpp",
+  "cs",
+  "php",
+  "pl",
+  "lua",
+  "r",
+  "m",
+  "swift",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "ps1",
+  "bat",
+  "cmd",
+  // DB / query / API
+  "sql",
+  "graphql",
+  "gql",
+  "proto",
+  // Ops / infra
+  "dockerfile",
+  "makefile",
+  "tf",
+  "tfvars",
+  "hcl",
+  // Diffs
+  "diff",
+  "patch",
+  // Captions / logs
+  "srt",
+  "vtt",
   "log",
-  "html",
-  "css",
-  "xml",
+  "out",
+  "err",
 ]);
 
 export interface SlackFileMetadata {
@@ -59,7 +148,7 @@ export type SlackFileReadResult =
       file: SlackFileMetadata;
       text: string;
       truncated: boolean;
-      source: "inline" | "download";
+      source: "inline" | "download" | "pdf-extract" | "zip-manifest" | "utf8-sniff";
     }
   | {
       kind: "image";
@@ -175,6 +264,7 @@ export async function readSlackFile(
   }
 
   const downloaded = await downloadSlackFile(downloadUrl, maxBytes, deps);
+
   if (isImageFile(file, downloaded.mimeType)) {
     return {
       kind: "image",
@@ -194,8 +284,99 @@ export async function readSlackFile(
     };
   }
 
+  // --- PDF: extract text server-side via pdf-parse ---
+  if (isPdfFile(file, downloaded.mimeType, downloaded.bytes)) {
+    try {
+      const parsed = await pdfParse(downloaded.bytes);
+      const pages = parsed?.numpages ?? 0;
+      const info = parsed?.info ? JSON.stringify(parsed.info) : "";
+      const header = `[PDF] ${metadata.name ?? metadata.title ?? fileId} — ${pages} page(s)${info ? ` — info: ${info}` : ""}\n\n`;
+      return {
+        kind: "text",
+        file: metadata,
+        text: header + (parsed?.text ?? "(no extractable text — possibly a scanned PDF)"),
+        truncated: false,
+        source: "pdf-extract",
+      };
+    } catch (err) {
+      throw new Error(
+        `PDF extract failed for ${fileId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // --- ZIP: list entries + inline small text files ---
+  if (isZipFile(file, downloaded.mimeType, downloaded.bytes)) {
+    try {
+      const zip = new AdmZip(downloaded.bytes);
+      const entries = zip.getEntries();
+      const manifestLines = [
+        `[ZIP] ${metadata.name ?? fileId} — ${entries.length} entries`,
+        "",
+        "Manifest (name, size, compressed):",
+      ];
+      for (const e of entries) {
+        const n = e.entryName;
+        const size = e.header?.size ?? 0;
+        const csize = e.header?.compressedSize ?? 0;
+        manifestLines.push(`  ${n}  (${size}B, ${csize}B compressed)`);
+      }
+      // Inline small text entries (≤ 64KB each, up to ~10 files)
+      const INLINE_MAX = 64 * 1024;
+      const INLINE_COUNT = 10;
+      let inlined = 0;
+      for (const e of entries) {
+        if (inlined >= INLINE_COUNT) break;
+        if (e.isDirectory) continue;
+        const size = e.header?.size ?? 0;
+        if (size > INLINE_MAX) continue;
+        const ext = (e.entryName.split(".").pop() ?? "").toLowerCase();
+        if (!TEXT_FILE_TYPES.has(ext)) continue;
+        try {
+          const data = e.getData().toString("utf8");
+          manifestLines.push("", `--- ${e.entryName} ---`, data);
+          inlined += 1;
+        } catch {
+          // skip unreadable entries
+        }
+      }
+      if (inlined === 0) {
+        manifestLines.push(
+          "",
+          "(No small text entries to inline. Use extract tooling in a followup tool call if needed.)",
+        );
+      }
+      return {
+        kind: "text",
+        file: metadata,
+        text: manifestLines.join("\n"),
+        truncated: false,
+        source: "zip-manifest",
+      };
+    } catch (err) {
+      throw new Error(
+        `ZIP read failed for ${fileId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // --- Final fallback: UTF-8 sniff. If bytes decode cleanly with < 2% control chars, treat as text. ---
+  if (looksLikeUtf8Text(downloaded.bytes)) {
+    const text = downloaded.bytes.toString("utf8");
+    return {
+      kind: "text",
+      file: metadata,
+      text,
+      truncated: false,
+      source: "utf8-sniff",
+    };
+  }
+
+  // Nothing usable — return a structured metadata description so the agent can decide what to do.
   throw new Error(
-    `Unsupported Slack file type: ${file.mimetype ?? file.filetype ?? downloaded.mimeType}`,
+    `Unsupported Slack file type: ${file.mimetype ?? file.filetype ?? downloaded.mimeType} ` +
+      `(${downloaded.bytes.length} bytes, name=${metadata.name ?? metadata.title ?? fileId}). ` +
+      `Add support or route through bash tools with a manual download.`,
   );
 }
 
@@ -227,9 +408,53 @@ function isTextLikeFile(file: SlackFileObject, mimeType?: string): boolean {
   if (effectiveMimeType.startsWith("text/") || TEXT_MIME_TYPES.has(effectiveMimeType)) {
     return true;
   }
-
   const filetype = (file.filetype ?? "").toLowerCase();
-  return TEXT_FILE_TYPES.has(filetype);
+  if (TEXT_FILE_TYPES.has(filetype)) return true;
+  // Also sniff by filename extension (Slack's `filetype` is not always set)
+  const name = (file.name ?? "").toLowerCase();
+  const dot = name.lastIndexOf(".");
+  if (dot > -1) {
+    const ext = name.slice(dot + 1);
+    if (TEXT_FILE_TYPES.has(ext)) return true;
+  }
+  return false;
+}
+
+function isPdfFile(file: SlackFileObject, mimeType: string, bytes: Buffer): boolean {
+  if (mimeType === "application/pdf") return true;
+  if ((file.filetype ?? "").toLowerCase() === "pdf") return true;
+  if ((file.mimetype ?? "") === "application/pdf") return true;
+  // PDF magic: %PDF-
+  return bytes.slice(0, 5).toString("ascii") === "%PDF-";
+}
+
+function isZipFile(file: SlackFileObject, mimeType: string, bytes: Buffer): boolean {
+  if (mimeType === "application/zip" || mimeType === "application/x-zip-compressed") return true;
+  if ((file.filetype ?? "").toLowerCase() === "zip") return true;
+  // ZIP magic: PK\x03\x04 or PK\x05\x06 (empty) or PK\x07\x08 (spanned)
+  const magic = bytes.slice(0, 4).toString("hex");
+  return magic === "504b0304" || magic === "504b0506" || magic === "504b0708";
+}
+
+/**
+ * Heuristic: returns true if the buffer decodes as mostly-printable UTF-8.
+ * Rejects anything with > 2% control chars (excluding \t, \n, \r) or invalid sequences.
+ */
+function looksLikeUtf8Text(bytes: Buffer): boolean {
+  if (bytes.length === 0) return false;
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return false;
+  }
+  let control = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) control += 1;
+    else if (code === 127) control += 1;
+  }
+  return control / text.length < 0.02;
 }
 
 async function downloadSlackFile(
@@ -262,8 +487,38 @@ async function downloadSlackFile(
     throw new Error(`Slack file exceeds max_bytes (${bytes.length} > ${maxBytes})`);
   }
 
+  const rawContentType = response.headers.get("content-type") ?? "application/octet-stream";
+  // Strip any charset/params: "image/png; charset=utf-8" -> "image/png"
+  const mimeType = rawContentType.split(";")[0].trim().toLowerCase();
+  // Magic-byte sniff for sanity (OpenAI rejects anything that's not a real image)
+  const magic = bytes.slice(0, 8).toString("hex");
+  // Strong signals:
+  //   89504e47 = PNG,  ffd8ff = JPEG,  47494638 = GIF,  52494646...57454250 = WEBP
+  let detected = "unknown";
+  if (magic.startsWith("89504e47")) detected = "image/png";
+  else if (magic.startsWith("ffd8ff")) detected = "image/jpeg";
+  else if (magic.startsWith("47494638")) detected = "image/gif";
+  else if (magic.startsWith("52494646") && bytes.slice(8, 12).toString("hex") === "57454250")
+    detected = "image/webp";
+  // If the CDN mime disagrees with the magic bytes, prefer the magic bytes —
+  // OpenAI will reject otherwise.
+  const finalMime = detected !== "unknown" ? detected : mimeType;
+  // eslint-disable-next-line no-console
+  console.log(
+    JSON.stringify({
+      name: "slack-mcp",
+      event: "file_downloaded",
+      bytes: bytes.length,
+      rawContentType,
+      parsedMime: mimeType,
+      magicHex: magic,
+      detectedMime: detected,
+      finalMime,
+    }),
+  );
+
   return {
     bytes,
-    mimeType: response.headers.get("content-type") ?? "application/octet-stream",
+    mimeType: finalMime,
   };
 }

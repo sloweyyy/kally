@@ -296,7 +296,7 @@ const SlackPostMessageOutput = z.object({
  * Extract aliases from completed tool call artifacts.
  *
  * Two sources:
- * - `bash` with [thor:meta]: pre-computed aliases from remote-cli / proxy services
+ * - `bash` with [kally:meta]: pre-computed aliases from remote-cli / proxy services
  * - `slack_post_message`: direct MCP tool (not proxied through bash)
  *
  * Best-effort: malformed artifacts are silently skipped.
@@ -307,8 +307,8 @@ export function extractAliases(artifacts: ToolArtifact[]): ExtractedAlias[] {
   for (const raw of artifacts) {
     try {
       if (raw.tool === "bash") {
-        // [thor:meta] lines contain pre-computed aliases from the service layer
-        for (const meta of extractThorMeta(raw.output)) {
+        // [kally:meta] lines contain pre-computed aliases from the service layer
+        for (const meta of extractKallyMeta(raw.output)) {
           if (meta.type === "alias") {
             aliases.push({ alias: meta.alias, context: meta.context });
           }
@@ -348,48 +348,48 @@ export function extractAliases(artifacts: ToolArtifact[]): ExtractedAlias[] {
 }
 
 /**
- * Schemas for [thor:meta] JSON payloads emitted to stderr by service layers.
+ * Schemas for [kally:meta] JSON payloads emitted to stderr by service layers.
  *
  * Discriminated union on `type`:
  * - `alias`: pre-computed correlation alias (git branch, Slack thread, etc.)
  * - `approval`: approval-required signal from the proxy
  *
  * Producers: remote-cli service, proxy service.
- * Consumer: extractThorMeta() in this module.
+ * Consumer: extractKallyMeta() in this module.
  */
-export const ThorMetaAliasSchema = z.object({
+export const KallyMetaAliasSchema = z.object({
   type: z.literal("alias"),
   alias: z.string(),
   context: z.string(),
 });
 
-export const ThorMetaApprovalSchema = z.object({
+export const KallyMetaApprovalSchema = z.object({
   type: z.literal("approval"),
   actionId: z.string(),
   proxyName: z.string(),
   tool: z.string(),
 });
 
-export const ThorMetaSchema = z.discriminatedUnion("type", [
-  ThorMetaAliasSchema,
-  ThorMetaApprovalSchema,
+export const KallyMetaSchema = z.discriminatedUnion("type", [
+  KallyMetaAliasSchema,
+  KallyMetaApprovalSchema,
 ]);
 
-export type ThorMetaAlias = z.infer<typeof ThorMetaAliasSchema>;
-export type ThorMetaApproval = z.infer<typeof ThorMetaApprovalSchema>;
-export type ThorMeta = z.infer<typeof ThorMetaSchema>;
+export type KallyMetaAlias = z.infer<typeof KallyMetaAliasSchema>;
+export type KallyMetaApproval = z.infer<typeof KallyMetaApprovalSchema>;
+export type KallyMeta = z.infer<typeof KallyMetaSchema>;
 
 /**
- * Extract all [thor:meta] entries from tool output.
+ * Extract all [kally:meta] entries from tool output.
  * Returns parsed metadata objects; malformed lines are silently skipped.
  */
-export function extractThorMeta(output: string): ThorMeta[] {
-  const results: ThorMeta[] = [];
-  const regex = /\[thor:meta]\s*(.+)/g;
+export function extractKallyMeta(output: string): KallyMeta[] {
+  const results: KallyMeta[] = [];
+  const regex = /\[kally:meta]\s*(.+)/g;
   let match;
   while ((match = regex.exec(output)) !== null) {
     try {
-      const parsed = ThorMetaSchema.safeParse(JSON.parse(match[1]));
+      const parsed = KallyMetaSchema.safeParse(JSON.parse(match[1]));
       if (parsed.success) results.push(parsed.data);
     } catch {
       // skip malformed JSON
@@ -483,22 +483,22 @@ export function extractBranchFromGitArgs(args: string[]): string | undefined {
 }
 
 /**
- * Build a [thor:meta] line from a typed payload.
+ * Build a [kally:meta] line from a typed payload.
  * Produces the string that services embed in stderr.
  */
-export function formatThorMeta(meta: ThorMeta): string {
-  return `\n[thor:meta] ${JSON.stringify(meta)}\n`;
+export function formatKallyMeta(meta: KallyMeta): string {
+  return `\n[kally:meta] ${JSON.stringify(meta)}\n`;
 }
 
 /**
  * Compute a git branch alias from command args and cwd.
- * Returns a ThorMetaAlias or undefined if not aliasable.
+ * Returns a KallyMetaAlias or undefined if not aliasable.
  */
 export function computeGitAlias(
   cmd: "git" | "gh",
   args: string[],
   cwd: string,
-): ThorMetaAlias | undefined {
+): KallyMetaAlias | undefined {
   if (!isAliasableGitCommand(args)) return undefined;
   const branch = extractBranchFromGitArgs(args);
   if (!branch) return undefined;
@@ -513,12 +513,12 @@ export function computeGitAlias(
 
 /**
  * Compute a Slack thread alias from post_message tool call.
- * Returns a ThorMetaAlias or undefined if not aliasable.
+ * Returns a KallyMetaAlias or undefined if not aliasable.
  */
 export function computeSlackAlias(
   toolArgs: Record<string, unknown>,
   result: string,
-): ThorMetaAlias | undefined {
+): KallyMetaAlias | undefined {
   const channel = (toolArgs.channel as string) || "unknown";
 
   if (toolArgs.thread_ts) {
@@ -625,7 +625,7 @@ function extractH1Key(filePath: string): string | undefined {
 }
 
 /**
- * Check if Thor is engaged in a Slack thread for this correlation key.
+ * Check if Kally is engaged in a Slack thread for this correlation key.
  *
  * Matches both the h1 canonical key (`# Session: slack:thread:…`) for
  * threads initiated by @mention, and h3 aliases (`### Session: slack:thread:…`)

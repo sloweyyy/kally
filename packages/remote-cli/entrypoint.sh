@@ -18,7 +18,7 @@ if [ -n "$GITHUB_PAT" ]; then
   export GIT_CONFIG_VALUE_0="x-access-token"
 fi
 
-git config --global user.name "${GIT_USER_NAME:-thor}"
-git config --global user.email "${GIT_USER_EMAIL:-thor@localhost}"
+git config --global user.name "${GIT_USER_NAME:-kally}"
+git config --global user.email "${GIT_USER_EMAIL:-kally@localhost}"
 
 exec "$@"

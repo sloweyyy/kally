@@ -38,7 +38,7 @@ Gateway ──(trigger)──▶ Runner
 | `POST /progress` | `{ channel, threadTs, event: ProgressEvent }` | Forward progress events       |
 | `POST /reaction` | `{ channel, timestamp, reaction }`            | Add emoji reaction to message |
 
-Shared Zod schemas (`SlackProgressRequestSchema`, `SlackReactionRequestSchema`) live in `@thor/common`.
+Shared Zod schemas (`SlackProgressRequestSchema`, `SlackReactionRequestSchema`) live in `@kally/common`.
 
 ### Progress Message Lifecycle
 
@@ -69,7 +69,7 @@ Shared Zod schemas (`SlackProgressRequestSchema`, `SlackReactionRequestSchema`) 
 | 6   | Status-aware cleanup (preserve errors)            | `onBotReply` deletes all non-error progress messages. Error messages are kept as evidence for debugging.                                                                                                                 |
 | 7   | No expiry timer on progress registry              | Simplicity over correctness for edge cases. Entries are tiny and process restarts clear them.                                                                                                                            |
 | 3   | REST endpoints (not MCP tools) for progress       | Gateway isn't an MCP client. Simple HTTP POST is the right interface.                                                                                                                                                    |
-| 4   | Shared Zod schemas in `@thor/common`              | Type safety at the boundary. Both producer (gateway) and consumer (slack-mcp) reference the same schema.                                                                                                                 |
+| 4   | Shared Zod schemas in `@kally/common`             | Type safety at the boundary. Both producer (gateway) and consumer (slack-mcp) reference the same schema.                                                                                                                 |
 
 ## Out of Scope
 
