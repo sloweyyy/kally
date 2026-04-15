@@ -1,15 +1,15 @@
 # Drop Unengaged Slack Messages — 2026-04-13-01
 
-> Non-mention messages in threads where Thor has never replied should be silently dropped instead of forwarded with a 60s delay.
+> Non-mention messages in threads where Kally has never replied should be silently dropped instead of forwarded with a 60s delay.
 
 ## Motivation
 
-Currently, all non-mention messages in allowlisted channels are forwarded to the runner — just with different delays (3s if engaged, 60s if not). This means Thor processes messages in threads it was never invited to, wasting compute and potentially confusing users.
+Currently, all non-mention messages in allowlisted channels are forwarded to the runner — just with different delays (3s if engaged, 60s if not). This means Kally processes messages in threads it was never invited to, wasting compute and potentially confusing users.
 
-The desired behavior: Thor only processes a Slack message if:
+The desired behavior: Kally only processes a Slack message if:
 
-1. It's an `app_mention` (someone explicitly tagged `@thor`), OR
-2. It's a non-mention in a thread where Thor has already replied (existing worklog)
+1. It's an `app_mention` (someone explicitly tagged `@kally`), OR
+2. It's a non-mention in a thread where Kally has already replied (existing worklog)
 
 ## Changes
 

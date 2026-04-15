@@ -1,5 +1,5 @@
 {
-  "name": "@thor/opencode-cli",
+  "name": "@kally/opencode-cli",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@thor/common": "workspace:*",
+    "@kally/common": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

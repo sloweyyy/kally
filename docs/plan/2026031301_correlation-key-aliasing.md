@@ -92,7 +92,7 @@ After a trigger completes, the runner inspects tool call results for cross-chann
 
 ## Phases
 
-### Phase 1 — Alias read/write in `@thor/common`
+### Phase 1 — Alias read/write in `@kally/common`
 
 **Goal**: Add `registerAlias()` and `resolveCorrelationKey()` to `notes.ts`.
 
@@ -144,7 +144,7 @@ The runner already receives `ToolPart` events via SSE. Currently it only collect
 
 #### Tools that produce aliasable artifacts
 
-> **OUTDATED** — `post_message` → `slack_post_message`, `git` tool → `bash` with `[thor:meta]`, repo inference changed. See [Amendment: Multi-key correlation resolution](#amendment-multi-key-correlation-resolution--2026-03-18).
+> **OUTDATED** — `post_message` → `slack_post_message`, `git` tool → `bash` with `[kally:meta]`, repo inference changed. See [Amendment: Multi-key correlation resolution](#amendment-multi-key-correlation-resolution--2026-03-18).
 
 | Tool name      | Input to inspect                | Output to extract         | Alias format                 |
 | -------------- | ------------------------------- | ------------------------- | ---------------------------- |
@@ -162,7 +162,7 @@ The runner already receives `ToolPart` events via SSE. Currently it only collect
 
 2. In the runner's stream loop, when a `ToolPart` has `status === "completed"` and `isAliasableTool(tool)`, collect `{ tool, input, output }` into `collectedArtifacts`.
 
-3. `extractAliases(artifacts)` in `@thor/common`:
+3. `extractAliases(artifacts)` in `@kally/common`:
    - **`post_message`** (new thread): parse output JSON for `ts` → `slack:thread:{ts}`
    - **`post_message`** (reply): `thread_ts` in input → `slack:thread:{thread_ts}` (session is engaging with that thread)
    - **`git`** (`push`/`checkout`/`switch`): extract branch from args, infer repo from `cwd` path convention (`/workspace/repos/{owner}-{repo}`) → `git:branch:{repo}:{branch}`
@@ -213,7 +213,7 @@ Steps:
 
 | Dependency          | Version | Purpose                         | Status   |
 | ------------------- | ------- | ------------------------------- | -------- |
-| `@thor/common`      | —       | Notes utilities (extended)      | Existing |
+| `@kally/common`     | —       | Notes utilities (extended)      | Existing |
 | No new dependencies | —       | File scanning uses `fs` + regex | —        |
 
 ---
@@ -227,7 +227,7 @@ The original design assumed the runner could infer the full `owner/repo` from th
 Additionally:
 
 - **Worktree paths** (`/workspace/worktrees/{name}/{branch}`) were not matched by `inferRepoFromPath`, which only checked `/workspace/repos/`.
-- **Tool names changed**: the `git` MCP tool was removed; git operations now go through the `bash` tool with `[thor:meta]` structured output from `remote-cli.mjs`. Similarly `post_message` became `slack_post_message`.
+- **Tool names changed**: the `git` MCP tool was removed; git operations now go through the `bash` tool with `[kally:meta]` structured output from `remote-cli.mjs`. Similarly `post_message` became `slack_post_message`.
 
 ### Design change: multi-key resolution
 
@@ -270,13 +270,13 @@ This ensures that when an old session matches the canonical key but a newer sess
 
 ### Updated tool → alias mapping
 
-| Tool name             | Input to inspect                 | Output to extract         | Alias format                     |
-| --------------------- | -------------------------------- | ------------------------- | -------------------------------- |
-| `slack_post_message`  | `thread_ts` absent → new thread  | parse JSON for `ts` field | `slack:thread:{ts}`              |
-| `slack_post_message`  | `thread_ts` present → reply      | (not needed)              | `slack:thread:{thread_ts}`       |
-| `bash` (git via meta) | `[thor:meta]` with push args     | (not needed)              | `git:branch:{repo-dir}:{branch}` |
-| `bash` (git via meta) | `[thor:meta]` with checkout args | (not needed)              | `git:branch:{repo-dir}:{branch}` |
-| `bash` (git via meta) | `[thor:meta]` with switch args   | (not needed)              | `git:branch:{repo-dir}:{branch}` |
+| Tool name             | Input to inspect                  | Output to extract         | Alias format                     |
+| --------------------- | --------------------------------- | ------------------------- | -------------------------------- |
+| `slack_post_message`  | `thread_ts` absent → new thread   | parse JSON for `ts` field | `slack:thread:{ts}`              |
+| `slack_post_message`  | `thread_ts` present → reply       | (not needed)              | `slack:thread:{thread_ts}`       |
+| `bash` (git via meta) | `[kally:meta]` with push args     | (not needed)              | `git:branch:{repo-dir}:{branch}` |
+| `bash` (git via meta) | `[kally:meta]` with checkout args | (not needed)              | `git:branch:{repo-dir}:{branch}` |
+| `bash` (git via meta) | `[kally:meta]` with switch args   | (not needed)              | `git:branch:{repo-dir}:{branch}` |
 
 ### Decision log (continued)
 
