@@ -1,4 +1,4 @@
-# Unified multi-target Dockerfile for all Thor Node.js services.
+# Unified multi-target Dockerfile for all Kally Node.js services.
 # Shared deps and build stages mean pnpm install runs once, not per-service.
 #
 # Usage in docker-compose.yml:
@@ -8,8 +8,8 @@
 
 FROM node:22-slim AS base
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
-RUN groupadd --gid 1001 thor && useradd --uid 1001 --gid thor --create-home thor
-RUN mkdir -p /workspace && chown thor:thor /workspace
+RUN groupadd --gid 1001 kally && useradd --uid 1001 --gid kally --create-home kally
+RUN mkdir -p /workspace && chown kally:kally /workspace
 
 # --- Install deps (cached until lockfile or package.json changes) ---
 FROM base AS deps
@@ -20,8 +20,10 @@ COPY packages/gateway/package.json packages/gateway/
 COPY packages/proxy/package.json packages/proxy/
 COPY packages/runner/package.json packages/runner/
 COPY packages/slack-mcp/package.json packages/slack-mcp/
+COPY packages/salesforce-mcp/package.json packages/salesforce-mcp/
 COPY packages/remote-cli/package.json packages/remote-cli/
 COPY packages/opencode-cli/package.json packages/opencode-cli/
+COPY packages/vault/package.json packages/vault/
 RUN pnpm install --frozen-lockfile
 
 # --- Build all packages ---
@@ -32,30 +34,52 @@ RUN pnpm -r build
 # === Per-service targets ===
 
 FROM build AS gateway
-USER thor
+USER kally
 WORKDIR /workspace
 ENV PORT=3002
 EXPOSE 3002
 CMD ["node", "/app/packages/gateway/dist/index.js"]
 
 FROM build AS proxy
-USER thor
+USER kally
 WORKDIR /workspace
 EXPOSE 3001
 CMD ["node", "/app/packages/proxy/dist/index.js"]
 
 FROM build AS runner
-USER thor
+USER kally
 WORKDIR /workspace
 ENV PORT=3000
 EXPOSE 3000
 CMD ["node", "/app/packages/runner/dist/index.js"]
 
 FROM build AS slack-mcp
-USER thor
+USER kally
 ENV PORT=3003
 EXPOSE 3003
 CMD ["node", "/app/packages/slack-mcp/dist/index.js"]
+
+FROM build AS vault
+USER kally
+WORKDIR /workspace
+ENV PORT=3006
+EXPOSE 3006
+CMD ["node", "/app/packages/vault/dist/index.js"]
+
+FROM build AS salesforce-mcp
+# Install Python 3 + pip for sf_ops.py subprocess (requests, python-dotenv)
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/sf-venv \
+    && /opt/sf-venv/bin/pip install --no-cache-dir -r /app/packages/salesforce-mcp/requirements.txt \
+    && chown -R kally:kally /opt/sf-venv
+ENV PYTHON_BIN=/opt/sf-venv/bin/python3
+ENV SF_OPS_PATH=/app/packages/salesforce-mcp/sf_ops.py
+USER kally
+ENV PORT=3005
+EXPOSE 3005
+CMD ["node", "/app/packages/salesforce-mcp/dist/index.js"]
 
 # --- Install upstream opencode from npm ---
 FROM base AS opencode
@@ -71,15 +95,16 @@ COPY docker/opencode/bin/metabase /usr/local/bin/metabase
 COPY --from=build /app/packages/opencode-cli/dist/proxy-cli.mjs /usr/local/bin/proxy-cli.mjs
 COPY docker/opencode/bin/mcp /usr/local/bin/mcp
 COPY docker/opencode/bin/approval /usr/local/bin/approval
-USER thor
-RUN mkdir -p /home/thor/.local/share/opencode /home/thor/.local/state
-ENV THOR_REMOTE_CLI_URL=http://remote-cli:3004
-ENV THOR_PROXY_URL=http://proxy:3001
+USER kally
+RUN mkdir -p /home/kally/.local/share/opencode /home/kally/.local/state
+ENV KALLY_REMOTE_CLI_URL=http://remote-cli:3004
+ENV KALLY_PROXY_URL=http://proxy:3001
 # Disable the question tool — it requires an interactive client to answer.
 # OpenCode only registers QuestionTool when OPENCODE_CLIENT is "app", "cli", or "desktop".
 # https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/registry.ts
-ENV OPENCODE_CLIENT=thor
-COPY --chown=thor:thor docker/opencode/config/ /home/thor/.config/opencode/
+ENV OPENCODE_CLIENT=kally
+# config/ holds agents, plugins, opencode.json, and skills in the new layout
+COPY --chown=kally:kally docker/opencode/config/ /home/kally/.config/opencode/
 ENTRYPOINT ["opencode"]
 
 FROM build AS remote-cli
@@ -89,7 +114,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
     && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*
 RUN npm i -g @scoutqa/cli@latest langfuse-cli@0.0.8
 COPY packages/remote-cli/entrypoint.sh /entrypoint.sh
-USER thor
+USER kally
 RUN mkdir -p /workspace/repos
 WORKDIR /workspace/repos
 ENV PORT=3004

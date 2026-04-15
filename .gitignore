@@ -23,3 +23,6 @@ test.sh
 
 # Kally
 /docker-volumes/
+
+# Claude Code local settings (per-machine)
+.claude/
