@@ -46,6 +46,27 @@ services:
       timeout: 3s
       retries: 10
 
+  google-mcp:
+    build:
+      context: .
+      target: google-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3008:3008"
+    volumes:
+      - ./docker-volumes/workspace:/workspace:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-./docker-volumes/workspace/google/service-account.json}:/workspace/google/service-account.json:ro
+    environment:
+      - NODE_ENV=production
+      - GOOGLE_APPLICATION_CREDENTIALS=/workspace/google/service-account.json
+      - OT_CONFIG_PATH=/workspace/ot-evidence.json
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3008/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   remote-cli:
     build:
       context: .
@@ -147,6 +168,8 @@ services:
       slack-mcp:
         condition: service_healthy
       salesforce-mcp:
+        condition: service_healthy
+      google-mcp:
         condition: service_healthy
       # grafana-mcp disabled for local dev
       # grafana-mcp:
@@ -275,6 +298,34 @@ services:
     volumes:
       - ./docker-volumes/workspace/cron:/workspace/cron:ro
       - ./docker-volumes/workspace/repos:/workspace/repos:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  dashboard:
+    image: node:22-slim
+    restart: unless-stopped
+    working_dir: /app
+    # Dev mode: mount source + node_modules, run `next dev`.
+    # For production: build a proper Dockerfile target with `next build` + `next start`.
+    command:
+      [
+        "sh",
+        "-c",
+        "npm install --prefer-offline 2>/dev/null; npx next dev --port 3007 --hostname 0.0.0.0",
+      ]
+    ports:
+      - "127.0.0.1:3007:3007"
+    environment:
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      - VAULT_FILE_PATH=/workspace/vault/kally.json
+      - VAULT_AUDIT_PATH=/workspace/vault/audit.jsonl
+    volumes:
+      - ./packages/dashboard:/app
+      - ./docker-volumes/workspace/vault:/workspace/vault:ro
+      - ./docker-volumes/workspace/config.json:/workspace/config.json:ro
     depends_on:
       gateway:
         condition: service_healthy
