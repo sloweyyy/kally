@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kally Dashboard</title>
+<style>
+  :root {
+    --dark: #26251e; --cream: #f2f1ed; --light: #e6e5e0;
+    --s100: #f7f7f4; --s300: #ebeae5; --s400: #e6e5e0; --s500: #e1e0db;
+    --orange: #f54e00; --error: #cf2d56; --success: #1f8a65; --gold: #c08532;
+    --thinking: #dfa88f; --grep: #9fc9a2; --read: #9fbbe0; --edit: #c0a8dd;
+    --border: rgba(38,37,30,0.1); --border-m: rgba(38,37,30,0.2);
+    --text2: rgba(38,37,30,0.55); --text3: rgba(38,37,30,0.4);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif; background:var(--cream); color:var(--dark); line-height:1.5; -webkit-font-smoothing:antialiased; }
+
+  .nav { position:sticky; top:0; z-index:10; background:rgba(242,241,237,0.92); backdrop-filter:blur(12px); border-bottom:1px solid var(--border); padding:12px 24px; display:flex; align-items:center; gap:12px; }
+  .nav-logo { font-size:1.2rem; font-weight:600; letter-spacing:-0.5px; }
+  .nav-sep { color:var(--text3); }
+  .nav-sub { font-size:0.81rem; font-weight:500; color:var(--text2); }
+  .nav-right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+
+  .pill { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:9999px; font-size:0.69rem; font-weight:600; }
+  .pill-g { background:rgba(31,138,101,0.12); color:var(--success); }
+  .pill-o { background:rgba(245,78,0,0.12); color:var(--orange); }
+  .pill-r { background:rgba(207,45,86,0.12); color:var(--error); }
+  .pill-y { background:rgba(192,133,50,0.12); color:var(--gold); }
+
+  .page { max-width:1200px; margin:0 auto; padding:40px 24px 80px; }
+  .hero h1 { font-size:2rem; font-weight:400; letter-spacing:-0.72px; }
+  .hero p { color:var(--text2); font-family:'Iowan Old Style','Palatino Linotype',Georgia,serif; font-size:1rem; margin-top:6px; }
+  .hero { margin-bottom:32px; }
+
+  .grid { display:grid; gap:14px; margin-bottom:28px; }
+  .g4 { grid-template-columns:repeat(4,1fr); }
+  .g3 { grid-template-columns:repeat(3,1fr); }
+  .g2 { grid-template-columns:repeat(2,1fr); }
+  @media(max-width:900px){.g4{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:600px){.g4,.g3,.g2{grid-template-columns:1fr;}}
+
+  .card { background:var(--s400); border:1px solid var(--border); border-radius:10px; padding:18px; transition:box-shadow 200ms; }
+  .card:hover { box-shadow:rgba(0,0,0,0.02) 0 0 16px,rgba(0,0,0,0.008) 0 0 8px; }
+  .card-white { background:var(--s100); }
+
+  .kpi-val { font-size:2rem; font-weight:400; letter-spacing:-0.5px; line-height:1.1; margin:6px 0 2px; }
+  .kpi-label { font-size:0.69rem; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:0.5px; }
+  .kpi-sub { font-size:0.63rem; color:var(--text3); }
+
+  .sec { margin-bottom:36px; }
+  .sec-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .sec-head h2 { font-size:1.25rem; font-weight:400; letter-spacing:-0.11px; }
+
+  /* Service grid */
+  .svc-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  @media(max-width:900px){.svc-grid{grid-template-columns:repeat(2,1fr);}}
+  .svc { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:8px; background:var(--s300); border:1px solid var(--border); font-size:0.75rem; font-weight:500; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot-ok { background:var(--success); }
+  .dot-err { background:var(--error); }
+  .dot-unk { background:var(--text3); }
+  .svc-name { flex:1; }
+  .svc-det { font-size:0.63rem; color:var(--text3); }
+
+  /* Bar chart */
+  .bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .bar-label { width:130px; font-size:0.75rem; font-weight:500; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-track { flex:1; height:22px; background:var(--s300); border-radius:4px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:4px; display:flex; align-items:center; padding-left:8px; transition:width 800ms ease; }
+  .bar-val { font-size:0.63rem; font-weight:600; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.2); }
+
+  /* Table */
+  table { width:100%; border-collapse:collapse; font-size:0.75rem; }
+  th { text-align:left; padding:6px 10px; font-weight:600; color:var(--text2); border-bottom:1px solid var(--border-m); font-size:0.63rem; text-transform:uppercase; letter-spacing:0.5px; }
+  td { padding:8px 10px; border-bottom:1px solid var(--border); }
+  tr:last-child td { border-bottom:none; }
+
+  /* Timeline */
+  .tl { list-style:none; }
+  .tl li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); align-items:flex-start; }
+  .tl li:last-child { border-bottom:none; }
+  .tl-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+  .tl-t { font-size:0.75rem; font-weight:500; }
+  .tl-m { font-size:0.63rem; color:var(--text3); margin-top:1px; }
+
+  /* Policy cards */
+  .pol { border-left:3px solid; }
+
+  .footer { text-align:center; padding:24px 0; color:var(--text3); font-size:0.69rem; border-top:1px solid var(--border); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .pulse { animation:pulse 1.5s ease-in-out infinite; }
+
+  .live-dot { width:6px; height:6px; border-radius:50%; background:var(--success); display:inline-block; animation:pulse 2s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <span class="nav-logo">Kally</span>
+  <span class="nav-sep">/</span>
+  <span class="nav-sub">Dashboard</span>
+  <div class="nav-right">
+    <span class="live-dot"></span>
+    <span id="status-pill" class="pill pill-y pulse">connecting...</span>
+    <span style="font-size:0.63rem;color:var(--text3)" id="ts"></span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="hero">
+    <h1>Kally v1</h1>
+    <p>Real-time monitoring. Per-user credentials, support-only gate, 4 skills live.</p>
+  </div>
+
+  <!-- KPIs -->
+  <div class="grid g4">
+    <div class="card"><div class="kpi-label">Enrolled</div><div class="kpi-val" id="k-enrolled">-</div><div class="kpi-sub">of 16 support</div></div>
+    <div class="card"><div class="kpi-label">Services</div><div class="kpi-val" id="k-svc">-</div><div class="kpi-sub">healthy</div></div>
+    <div class="card"><div class="kpi-label">Upstreams</div><div class="kpi-val" id="k-up">-</div><div class="kpi-sub">MCP connected</div></div>
+    <div class="card"><div class="kpi-label">Tracing</div><div class="kpi-val" id="k-trace">-</div><div class="kpi-sub">LangSmith</div></div>
+  </div>
+
+  <!-- Services -->
+  <div class="sec">
+    <div class="sec-head"><h2>Services</h2></div>
+    <div class="svc-grid" id="svc-grid"><div class="svc"><div class="dot dot-unk"></div><span class="pulse">loading...</span></div></div>
+  </div>
+
+  <!-- Two columns: audit + policies -->
+  <div class="grid g2">
+    <!-- Audit log -->
+    <div class="sec">
+      <div class="sec-head"><h2>Vault audit (live)</h2></div>
+      <div class="card card-white" style="max-height:400px;overflow-y:auto">
+        <ul class="tl" id="audit-tl"><li><div class="tl-dot" style="background:var(--text3)"></div><div><div class="tl-t pulse">Connecting...</div></div></li></ul>
+      </div>
+    </div>
+
+    <!-- Enrolled users -->
+    <div class="sec">
+      <div class="sec-head"><h2>Enrolled users</h2></div>
+      <div class="card card-white" id="enrolled-card"><div class="pulse" style="font-size:0.75rem;color:var(--text3)">Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- Policies -->
+  <div class="sec">
+    <div class="sec-head"><h2>Access policies</h2></div>
+    <div class="grid g3">
+      <div class="card pol" style="border-left-color:var(--success)"><div class="kpi-label">Salesforce</div><div style="font-size:1.1rem;margin:4px 0">support</div><div style="font-size:0.69rem;color:var(--text2)">16 emails. per_user_creds: args mode.</div></div>
+      <div class="card pol" style="border-left-color:var(--read)"><div class="kpi-label">Atlassian</div><div style="font-size:1.1rem;margin:4px 0">katalon</div><div style="font-size:0.69rem;color:var(--text2)">Any @katalon.com. per_user_creds: connection mode.</div></div>
+      <div class="card pol" style="border-left-color:var(--text3)"><div class="kpi-label">Slack</div><div style="font-size:1.1rem;margin:4px 0">public</div><div style="font-size:0.69rem;color:var(--text2)">Any channel Kally is invited to.</div></div>
+    </div>
+  </div>
+
+  <!-- Metrics targets -->
+  <div class="sec">
+    <div class="sec-head"><h2>Metrics targets</h2></div>
+    <div class="card">
+      <table>
+        <thead><tr><th>#</th><th>Metric</th><th>Target</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>G1</td><td>Adoption</td><td>14/16 in 2 weeks</td><td><span class="pill pill-o" id="m-g1">1/16</span></td></tr>
+          <tr><td>G2</td><td>Usage/user</td><td>10+ triage/week</td><td><span class="pill pill-y">pilot</span></td></tr>
+          <tr><td>G3</td><td>KSR time saved</td><td>&lt;3 min review</td><td><span class="pill pill-y">pilot</span></td></tr>
+          <tr><td>G4</td><td>Attribution</td><td>100% per-user SF</td><td><span class="pill pill-g">live</span></td></tr>
+          <tr><td>G5</td><td>Access gate</td><td>0 non-support SF</td><td><span class="pill pill-g">live</span></td></tr>
+          <tr><td>G6</td><td>LLM cost</td><td>&lt;$50/user/month</td><td><span class="pill pill-y">pilot</span></td></tr>
+          <tr><td>G7</td><td>Top skills</td><td>runbook+ksr &gt;70%</td><td><span class="pill pill-y">pilot</span></td></tr>
+          <tr><td>G8</td><td>Tool error rate</td><td>&lt;5%/week</td><td><span class="pill pill-y">pilot</span></td></tr>
+          <tr><td>G9</td><td>Queue/agent</td><td>-20% in 4 weeks</td><td><span class="pill pill-o">baseline</span></td></tr>
+          <tr><td>G10</td><td>Stale Bug/FR</td><td>0 &gt;5d stale</td><td><span class="pill pill-o">baseline</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Links -->
+  <div class="sec">
+    <div class="sec-head"><h2>Quick links</h2></div>
+    <div class="grid g4">
+      <a href="https://smith.langchain.com" target="_blank" class="card" style="text-decoration:none;color:var(--dark)"><div class="kpi-label">Traces</div><div style="font-size:0.88rem;margin-top:4px">LangSmith</div><div class="kpi-sub">project: kally</div></a>
+      <a href="https://example.atlassian.net/wiki/spaces/CST/pages/0000000000/Kally" target="_blank" class="card" style="text-decoration:none;color:var(--dark)"><div class="kpi-label">Docs</div><div style="font-size:0.88rem;margin-top:4px">Confluence</div><div class="kpi-sub">PRD + Architecture</div></a>
+      <a href="https://example.atlassian.net/wiki/spaces/CST/pages/0000000001" target="_blank" class="card" style="text-decoration:none;color:var(--dark)"><div class="kpi-label">Product</div><div style="font-size:0.88rem;margin-top:4px">PRD v1</div><div class="kpi-sub">goals + rollout</div></a>
+      <a href="https://example.atlassian.net/wiki/spaces/CST/pages/0000000002" target="_blank" class="card" style="text-decoration:none;color:var(--dark)"><div class="kpi-label">Onboarding</div><div style="font-size:0.88rem;margin-top:4px">User Guide</div><div class="kpi-sub">for teammates</div></a>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Kally v1 — Product Support AI Teammate — April 2026 — model: openai/gpt-5.4</div>
+
+<script>
+const COLORS = {
+  put: 'var(--success)', get: 'var(--read)', delete: 'var(--error)', list: 'var(--gold)',
+};
+
+function renderHealth(h) {
+  const grid = document.getElementById('svc-grid');
+  grid.innerHTML = h.services.map(s => {
+    const cls = s.ok ? 'dot-ok' : 'dot-err';
+    const det = s.ok
+      ? (s.data?.connected !== undefined ? `${s.data.connected} upstreams` :
+         s.data?.tools !== undefined ? `${s.data.tools} tools` :
+         s.data?.opencode || s.data?.status || '')
+      : (s.error || 'down');
+    return `<div class="svc"><div class="dot ${cls}"></div><span class="svc-name">${s.name}</span><span class="svc-det">${det}</span></div>`;
+  }).join('');
+
+  document.getElementById('k-svc').textContent = `${h.healthy}/${h.total}`;
+  const proxy = h.services.find(s => s.name === 'proxy');
+  document.getElementById('k-up').textContent = proxy?.data?.connected || '?';
+  const runner = h.services.find(s => s.name === 'runner');
+  document.getElementById('k-trace').textContent = runner?.data?.opencode === 'connected' ? 'live' : 'off';
+  document.getElementById('ts').textContent = h.ts ? new Date(h.ts).toLocaleTimeString() : '';
+
+  const pill = document.getElementById('status-pill');
+  if (h.healthy === h.total) { pill.className = 'pill pill-g'; pill.textContent = 'all healthy'; }
+  else if (h.healthy > 0) { pill.className = 'pill pill-o'; pill.textContent = `${h.healthy}/${h.total}`; }
+  else { pill.className = 'pill pill-r'; pill.textContent = 'down'; }
+}
+
+function renderAudit(entries) {
+  const tl = document.getElementById('audit-tl');
+  if (!entries.length) { tl.innerHTML = '<li><div class="tl-t" style="color:var(--text3)">No audit entries yet</div></li>'; return; }
+  tl.innerHTML = entries.slice().reverse().map(e => {
+    const color = COLORS[e.action] || 'var(--text3)';
+    const label = e.action === 'put' ? 'enrolled' : e.action === 'delete' ? 'revoked' : e.action === 'get' ? 'cred read' : e.action;
+    const purpose = e.purpose ? ` for ${e.purpose}` : '';
+    const ts = e.ts ? new Date(e.ts).toLocaleTimeString() : '';
+    return `<li><div class="tl-dot" style="background:${color}"></div><div><div class="tl-t">${label} ${e.provider || ''}${purpose}</div><div class="tl-m">${e.slack_uid || '?'} ${e.actor ? 'via ' + e.actor : ''} ${ts}</div></div></li>`;
+  }).join('');
+}
+
+function renderStats(stats) {
+  if (stats.enrolled !== undefined) {
+    document.getElementById('k-enrolled').textContent = stats.enrolled;
+    document.getElementById('m-g1').textContent = `${stats.enrolled}/16`;
+  }
+  if (stats.users) {
+    const card = document.getElementById('enrolled-card');
+    const entries = Object.entries(stats.users);
+    if (entries.length === 0) {
+      card.innerHTML = '<div style="font-size:0.75rem;color:var(--text3)">No users enrolled yet</div>';
+      return;
+    }
+    card.innerHTML = `<table><thead><tr><th>User</th><th>Providers</th><th>Since</th></tr></thead><tbody>${
+      entries.map(([uid, providers]) =>
+        `<tr><td style="font-family:ui-monospace,monospace;font-size:0.69rem">${uid}</td><td>${
+          providers.map(p => `<span class="pill pill-g" style="margin-right:4px">${p.provider}</span>`).join('')
+        }</td><td style="font-size:0.63rem;color:var(--text3)">${new Date(providers[0].created_at).toLocaleDateString()}</td></tr>`
+      ).join('')
+    }</tbody></table>`;
+  }
+}
+
+// SSE connection
+function connect() {
+  const es = new EventSource('/api/stream');
+  const pill = document.getElementById('status-pill');
+
+  es.onopen = () => { pill.className = 'pill pill-g'; pill.textContent = 'connected'; };
+  es.onerror = () => { pill.className = 'pill pill-r'; pill.textContent = 'reconnecting...'; };
+
+  es.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'health') renderHealth(msg.data);
+      if (msg.type === 'audit') renderAudit(msg.data);
+      if (msg.type === 'stats') renderStats(msg.data);
+    } catch {}
+  };
+}
+
+connect();
+</script>
+</body>
+</html>

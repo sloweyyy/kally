@@ -1,4 +1,4 @@
-# Thor — Docker Compose
+# Kally — Docker Compose
 #
 # Start:   docker compose up --build -d
 # Test:    ./scripts/test-e2e.sh
@@ -21,6 +21,48 @@ services:
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  salesforce-mcp:
+    build:
+      context: .
+      target: salesforce-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3005:3005"
+    environment:
+      - NODE_ENV=production
+      - SALESFORCE_CLIENT_ID=${SALESFORCE_CLIENT_ID}
+      - SALESFORCE_CLIENT_SECRET=${SALESFORCE_CLIENT_SECRET}
+      - SALESFORCE_USERNAME=${SALESFORCE_USERNAME}
+      - SALESFORCE_PASSWORD=${SALESFORCE_PASSWORD}
+      - SALESFORCE_INSTANCE_URL=${SALESFORCE_INSTANCE_URL}
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  google-mcp:
+    build:
+      context: .
+      target: google-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3008:3008"
+    volumes:
+      - ./docker-volumes/workspace:/workspace:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-./docker-volumes/workspace/google/service-account.json}:/workspace/google/service-account.json:ro
+    environment:
+      - NODE_ENV=production
+      - GOOGLE_APPLICATION_CREDENTIALS=/workspace/google/service-account.json
+      - OT_CONFIG_PATH=/workspace/ot-evidence.json
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3008/health').then(r=>{if(!r.ok)throw 1})"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -52,7 +94,7 @@ services:
       - METABASE_DATABASE_ID=${METABASE_DATABASE_ID:-}
       - METABASE_ALLOWED_SCHEMAS=${METABASE_ALLOWED_SCHEMAS:-}
     volumes:
-      - ./docker-volumes/home/thor:/home/thor
+      - ./docker-volumes/home/kally:/home/kally
       - ./docker-volumes/workspace:/workspace
       - ./docker-volumes/github-app:/var/lib/remote-cli/github-app
     depends_on:
@@ -67,30 +109,54 @@ services:
       timeout: 3s
       retries: 10
 
-  grafana-mcp:
-    image: grafana/mcp-grafana:0.11.3
+  # grafana-mcp disabled for local dev — re-enable when GRAFANA_URL + token are real.
+  # grafana-mcp:
+  #   image: grafana/mcp-grafana:0.11.3
+  #   restart: unless-stopped
+  #   entrypoint:
+  #     [
+  #       "/app/mcp-grafana",
+  #       "-transport",
+  #       "streamable-http",
+  #       "-address",
+  #       "0.0.0.0:8000",
+  #       "-enabled-tools",
+  #       "datasource,loki,proxied",
+  #     ]
+  #   environment:
+  #     - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
+  #     - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "bash",
+  #         "-c",
+  #         "echo -e 'GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/8000",
+  #       ]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+
+  vault:
+    build:
+      context: .
+      target: vault
     restart: unless-stopped
-    entrypoint:
-      [
-        "/app/mcp-grafana",
-        "-transport",
-        "streamable-http",
-        "-address",
-        "0.0.0.0:8000",
-        "-enabled-tools",
-        "datasource,loki,proxied",
-      ]
+    # Internal-only — no host port mapping. Other services reach it as
+    # http://vault:3006 on the compose network. This is the main defense:
+    # vault is not exposed to the host, so only containers on the compose
+    # network can talk to it, and each call must still carry the bearer
+    # token (KALLY_VAULT_TOKEN).
     environment:
-      - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
-      - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
+      - NODE_ENV=production
+      - KALLY_VAULT_MASTER_KEY=${KALLY_VAULT_MASTER_KEY:?set KALLY_VAULT_MASTER_KEY}
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:?set KALLY_VAULT_TOKEN}
+    volumes:
+      - ./docker-volumes/workspace/vault:/workspace/vault
     healthcheck:
       test:
-        [
-          "CMD",
-          "bash",
-          "-c",
-          "echo -e 'GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/8000",
-        ]
+        ["CMD", "node", "-e", "fetch('http://localhost:3006/health').then(r=>{if(!r.ok)throw 1})"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -124,12 +190,14 @@ services:
     working_dir: /workspace
     command: ["serve", "--port", "4096", "--hostname", "0.0.0.0"]
     volumes:
-      - ./docker-volumes/opencode:/home/thor/.local/share/opencode
+      - ./docker-volumes/opencode:/home/kally/.local/share/opencode
       - ./docker-volumes/workspace/memory:/workspace/memory
       - ./docker-volumes/workspace/repos:/workspace/repos:ro
       - ./docker-volumes/workspace/worklog:/workspace/worklog:ro
       - ./docker-volumes/workspace/cron:/workspace/cron
       - ./docker-volumes/workspace/worktrees:/workspace/worktrees
+      # Share host opencode auth (all providers: anthropic, openai, codex, google, etc.)
+      - ${HOME}/.local/share/opencode/auth.json:/home/kally/.local/share/opencode/auth.json
     depends_on:
       remote-cli:
         condition: service_healthy
@@ -157,6 +225,9 @@ services:
     environment:
       - NODE_ENV=production
       - OPENCODE_URL=http://opencode:4096
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
     volumes:
       - ./docker-volumes/workspace:/workspace
     depends_on:
@@ -173,12 +244,15 @@ services:
     environment:
       - NODE_ENV=production
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_BOT_USER_ID=${SLACK_BOT_USER_ID:?set SLACK_BOT_USER_ID}
       - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
       - OPENAI_AUTH_PATH=/opencode/auth.json
       - REMOTE_CLI_HOST=remote-cli
       - REMOTE_CLI_PORT=3004
       - RESOLVE_SECRET=${RESOLVE_SECRET:?set RESOLVE_SECRET}
+      - KALLY_VAULT_URL=http://vault:3006
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:-}
     volumes:
       - ./docker-volumes/workspace:/workspace
       - ./docker-volumes/opencode:/opencode:ro
@@ -206,6 +280,34 @@ services:
     volumes:
       - ./docker-volumes/workspace/cron:/workspace/cron:ro
       - ./docker-volumes/workspace/repos:/workspace/repos:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  dashboard:
+    image: node:22-slim
+    restart: unless-stopped
+    working_dir: /app
+    # Dev mode: mount source + node_modules, run `next dev`.
+    # For production: build a proper Dockerfile target with `next build` + `next start`.
+    command:
+      [
+        "sh",
+        "-c",
+        "npm install --prefer-offline 2>/dev/null; npx next dev --port 3007 --hostname 0.0.0.0",
+      ]
+    ports:
+      - "127.0.0.1:3007:3007"
+    environment:
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
+      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      - VAULT_FILE_PATH=/workspace/vault/kally.json
+      - VAULT_AUDIT_PATH=/workspace/vault/audit.jsonl
+    volumes:
+      - ./packages/dashboard:/app
+      - ./docker-volumes/workspace/vault:/workspace/vault:ro
+      - ./docker-volumes/workspace/config.json:/workspace/config.json:ro
     depends_on:
       gateway:
         condition: service_healthy

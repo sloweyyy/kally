@@ -12,7 +12,7 @@ import type {
   ToolStateError,
 } from "@opencode-ai/sdk";
 import { EventBusRegistry, waitForSessionSettled } from "./event-bus.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import {
   createLogger,
   logInfo,
@@ -27,7 +27,7 @@ import {
   getSessionIdFromNotes,
   isAliasableTool,
   extractAliases,
-  extractThorMeta,
+  extractKallyMeta,
   registerAlias,
   getNotesLineCount,
   isAllowedDirectory,
@@ -35,9 +35,11 @@ import {
   WORKSPACE_CONFIG_PATH,
   extractRepoFromCwd,
   getRepoUpstreams,
-} from "@thor/common";
-import type { ToolArtifact } from "@thor/common";
-import type { ProgressEvent } from "@thor/common";
+  KallyTracer,
+  TraceMetadataSchema,
+} from "@kally/common";
+import type { ToolArtifact, TraceHandle, TraceMetadata } from "@kally/common";
+import type { ProgressEvent } from "@kally/common";
 
 const log = createLogger("runner");
 
@@ -58,6 +60,9 @@ const getWorkspaceConfig = createConfigLoader(WORKSPACE_CONFIG_PATH);
 
 /** Shared event buses — one SSE connection per directory, dispatches to per-session listeners. */
 const eventBuses = new EventBusRegistry(OPENCODE_URL);
+
+/** LangSmith tracer. No-op when LANGSMITH_API_KEY is not set. */
+const tracer = new KallyTracer({ logger: log });
 
 /** Read a file, returns trimmed content or undefined. */
 function readMemoryFile(filePath: string): string | undefined {
@@ -192,6 +197,9 @@ const TriggerRequestSchema = z.object({
   interrupt: z.boolean().optional(),
   /** Working directory for the OpenCode session. */
   directory: z.string(),
+  /** Optional observability metadata (event source, user id, channel id).
+   *  Attached to the LangSmith trace. */
+  metadata: TraceMetadataSchema.optional(),
 });
 
 type TriggerRequest = z.infer<typeof TriggerRequestSchema>;
@@ -344,7 +352,17 @@ app.post("/trigger", async (req, res) => {
     return;
   }
 
-  let { prompt, model, correlationKey, sessionId: requestedSessionId, directory } = parsed.data;
+  let {
+    prompt,
+    model,
+    correlationKey,
+    sessionId: requestedSessionId,
+    directory,
+    metadata: triggerMetadata,
+  } = parsed.data;
+
+  // Hoisted so the catch block can close the trace if we fail mid-flight.
+  let trace: TraceHandle | undefined;
 
   try {
     await ensureOpencodeAvailable();
@@ -522,6 +540,63 @@ app.post("/trigger", async (req, res) => {
         }
       : undefined;
 
+    // --- Stash user identity per-session so the OpenCode plugin can inject
+    // it into shell envs on tool calls. Both containers mount /workspace; the
+    // kally.js plugin reads this file on every shell.env hook. ---
+    if (triggerMetadata?.user_id || triggerMetadata?.user_email) {
+      try {
+        const userDir = `${MEMORY_DIR}/sessions/${sessionId}`;
+        mkdirSync(userDir, { recursive: true });
+        writeFileSync(
+          `${userDir}/user.json`,
+          JSON.stringify({
+            user_id: triggerMetadata.user_id,
+            user_email: triggerMetadata.user_email,
+            event_source: triggerMetadata.event_source,
+            updated_at: new Date().toISOString(),
+          }),
+          "utf-8",
+        );
+      } catch (err) {
+        logWarn(log, "user_json_write_failed", {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // --- Open LangSmith trace (no-op when LANGSMITH_API_KEY is unset) ---
+    const inferredRepo = extractRepoFromCwd(sessionDirectory);
+    const traceMetadata: TraceMetadata = {
+      ...(triggerMetadata ?? {}),
+      repo: triggerMetadata?.repo ?? inferredRepo,
+    };
+    trace = tracer.startTrace({
+      prompt,
+      correlationKey,
+      opencodeSessionId: sessionId,
+      directory: sessionDirectory,
+      model,
+      resumed,
+      metadata: traceMetadata,
+    });
+
+    // Per-session assistant-text buffers so each step-finish's llm run carries
+    // the text that was generated during that step.
+    const sessionTextBuffers = new Map<string, string[]>();
+    function bufferSessionText(sid: string, text: string): void {
+      const buf = sessionTextBuffers.get(sid);
+      if (buf) buf.push(text);
+      else sessionTextBuffers.set(sid, [text]);
+    }
+    function flushSessionText(sid: string): string | undefined {
+      const buf = sessionTextBuffers.get(sid);
+      if (!buf || buf.length === 0) return undefined;
+      const out = buf.join("");
+      sessionTextBuffers.set(sid, []);
+      return out;
+    }
+
     // Subscribe to event bus BEFORE sending the prompt
     const subscription = await eventBuses.subscribe(sessionDirectory, [sessionId]);
 
@@ -605,7 +680,44 @@ app.post("/trigger", async (req, res) => {
             if (status === "completed" || status === "error") {
               const displayName = toolDisplayName(toolPart);
               emit({ type: "tool", tool: displayName, status });
+              // Record child tool call to LangSmith trace (attached to the
+              // subagent chain keyed by the child session id).
+              if (trace?.enabled) {
+                if (status === "completed") {
+                  const completed = toolPart.state as ToolStateCompleted;
+                  void trace.recordTool({
+                    name: displayName,
+                    tool: toolPart.tool,
+                    input: completed.input,
+                    output: completed.output,
+                    durationMs: completed.time.end - completed.time.start,
+                    sessionId: toolPart.sessionID,
+                  });
+                } else {
+                  const errState = toolPart.state as ToolStateError;
+                  void trace.recordTool({
+                    name: displayName,
+                    tool: toolPart.tool,
+                    input: (toolPart.state as { input?: unknown }).input,
+                    error: String(errState.error),
+                    sessionId: toolPart.sessionID,
+                  });
+                }
+              }
             }
+          } else if (trace.enabled && part.type === "text") {
+            const tp = part as TextPart;
+            bufferSessionText(tp.sessionID, tp.text);
+          } else if (trace.enabled && part.type === "step-finish") {
+            const sf = part as StepFinishPart;
+            void trace.recordStep({
+              reason: sf.reason,
+              cost: sf.cost,
+              tokens: sf.tokens,
+              model,
+              text: flushSessionText(sf.sessionID),
+              sessionId: sf.sessionID,
+            });
           }
         }
         continue;
@@ -623,6 +735,7 @@ app.post("/trigger", async (req, res) => {
           const textPart = part as TextPart;
           collectedTextParts.push(textPart.text);
           lastMessageId = textPart.messageID;
+          if (trace?.enabled) bufferSessionText(textPart.sessionID, textPart.text);
         } else if (part.type === "tool") {
           const toolPart = part as ToolPart;
           const status = toolPart.state.status;
@@ -669,6 +782,30 @@ app.post("/trigger", async (req, res) => {
                 output: typeof completed.output === "string" ? completed.output : "",
               });
             }
+
+            // Record to LangSmith trace.
+            if (trace?.enabled) {
+              if (status === "completed") {
+                const completed = toolPart.state as ToolStateCompleted;
+                void trace.recordTool({
+                  name: displayName,
+                  tool: toolPart.tool,
+                  input: completed.input,
+                  output: completed.output,
+                  durationMs: completed.time.end - completed.time.start,
+                  sessionId: toolPart.sessionID,
+                });
+              } else {
+                const errState = toolPart.state as ToolStateError;
+                void trace.recordTool({
+                  name: displayName,
+                  tool: toolPart.tool,
+                  input: (toolPart.state as { input?: unknown }).input,
+                  error: String(errState.error),
+                  sessionId: toolPart.sessionID,
+                });
+              }
+            }
           }
           lastMessageId = toolPart.messageID;
         } else if (part.type === "step-finish") {
@@ -680,6 +817,16 @@ app.post("/trigger", async (req, res) => {
           totalTokens.cache.read += stepFinish.tokens.cache.read;
           totalTokens.cache.write += stepFinish.tokens.cache.write;
           lastMessageId = stepFinish.messageID;
+          if (trace?.enabled) {
+            void trace.recordStep({
+              reason: stepFinish.reason,
+              cost: stepFinish.cost,
+              tokens: stepFinish.tokens,
+              model,
+              text: flushSessionText(stepFinish.sessionID),
+              sessionId: stepFinish.sessionID,
+            });
+          }
         }
       } else if (event.type === "session.error") {
         const errorProps = event.properties;
@@ -701,6 +848,19 @@ app.post("/trigger", async (req, res) => {
     subscription.close();
 
     const durationMs = Date.now() - promptStart;
+
+    // End LangSmith trace (fire-and-forget; don't block the response).
+    if (trace?.enabled) {
+      void trace.end({
+        status: sessionError ? "error" : "completed",
+        response: collectedTextParts.join("\n\n"),
+        toolCalls: collectedToolCalls,
+        totalCost,
+        totalTokens,
+        error: sessionError,
+        durationMs,
+      });
+    }
 
     // Append summary to the markdown notes file
     if (correlationKey) {
@@ -761,6 +921,13 @@ app.post("/trigger", async (req, res) => {
     res.end();
   } catch (err) {
     logError(log, "trigger_error", err);
+    // Close any in-flight trace so we don't leave a "running" run dangling.
+    if (trace?.enabled) {
+      void trace.end({
+        status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     if (!res.headersSent) {
       res.status(500).json({
         error: err instanceof Error ? err.message : String(err),
@@ -797,14 +964,14 @@ function isSessionEvent(event: Event, sessionId: string): boolean {
 
 /**
  * Parse a tool result for approval-required signal.
- * remote-cli emits a [thor:meta] line with { type: "approval", actionId, proxyName, tool }.
+ * The proxy emits a [kally:meta] line with { type: "approval", actionId, proxyName, tool }.
  */
 function parseApprovalResult(
   output: string,
   tool: string,
   args: Record<string, unknown>,
 ): ProgressEvent | undefined {
-  for (const meta of extractThorMeta(output)) {
+  for (const meta of extractKallyMeta(output)) {
     if (meta.type === "approval") {
       return {
         type: "approval_required",

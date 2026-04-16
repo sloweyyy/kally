@@ -1,5 +1,5 @@
 {
-  "name": "@thor/remote-cli",
+  "name": "@kally/remote-cli",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "@thor/common": "workspace:*",
+    "@kally/common": "workspace:*",
     "express": "^5.1.0",
     "zod": "^4.3.6"
   },
