@@ -30,7 +30,7 @@ RUN pnpm install --frozen-lockfile
 # --- Build all packages ---
 FROM deps AS build
 COPY packages/ packages/
-RUN pnpm -r build
+RUN pnpm -r --filter '!dashboard' build
 
 # === Per-service targets ===
 
