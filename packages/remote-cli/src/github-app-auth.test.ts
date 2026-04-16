@@ -9,7 +9,7 @@ import {
   resolveInstallation,
   generateAppJWT,
 } from "./github-app-auth.js";
-import { loadWorkspaceConfig } from "@thor/common";
+import { loadWorkspaceConfig } from "@kally/common";
 
 // ── Org resolution from args ─────────────────────────────────────────────────
 

@@ -13,7 +13,7 @@
 
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk";
 import { EventEmitter } from "node:events";
-import { createLogger, logInfo, logError } from "@thor/common";
+import { createLogger, logInfo, logError } from "@kally/common";
 
 const log = createLogger("event-bus");
 

@@ -3,7 +3,7 @@ import {
   computeSlackAlias,
   createLogger,
   extractRepoFromCwd,
-  formatThorMeta,
+  formatKallyMeta,
   getRepoUpstreams,
   interpolateHeaders,
   isAliasableMcpTool,
@@ -14,7 +14,7 @@ import {
   type ProxyConfig,
   type WorkspaceConfig,
   writeToolCallLog,
-} from "@thor/common";
+} from "@kally/common";
 import { ApprovalStore, type ApprovalAction } from "./approval-store.js";
 import {
   classifyTool,
@@ -399,7 +399,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       let stdout = unwrapResult(result);
       if (isAliasableMcpTool(toolName)) {
         const alias = computeSlackAlias(args, stdout);
-        if (alias) stdout += formatThorMeta(alias);
+        if (alias) stdout += formatKallyMeta(alias);
       }
       return ok(stdout);
     } catch (err) {
@@ -443,7 +443,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       });
       writeToolCallLogFn({ tool: toolInfo.name, decision: "pending", args });
       const approvalText = `Approval required for \`${toolInfo.name}\`. Run: approval status ${action.id}`;
-      const approvalMeta = formatThorMeta({
+      const approvalMeta = formatKallyMeta({
         type: "approval",
         actionId: action.id,
         proxyName: instance.name,

@@ -19,14 +19,17 @@ COPY packages/common/package.json packages/common/
 COPY packages/gateway/package.json packages/gateway/
 COPY packages/runner/package.json packages/runner/
 COPY packages/slack-mcp/package.json packages/slack-mcp/
+COPY packages/salesforce-mcp/package.json packages/salesforce-mcp/
 COPY packages/remote-cli/package.json packages/remote-cli/
 COPY packages/opencode-cli/package.json packages/opencode-cli/
+COPY packages/vault/package.json packages/vault/
+COPY packages/google-mcp/package.json packages/google-mcp/
 RUN pnpm install --frozen-lockfile
 
 # --- Build all packages ---
 FROM deps AS build
 COPY packages/ packages/
-RUN pnpm -r build
+RUN pnpm -r --filter '!dashboard' build
 
 # === Per-service targets ===
 
@@ -50,6 +53,44 @@ ENV PORT=3003
 EXPOSE 3003
 CMD ["node", "/app/packages/slack-mcp/dist/index.js"]
 
+FROM build AS vault
+USER thor
+WORKDIR /workspace
+ENV PORT=3006
+EXPOSE 3006
+CMD ["node", "/app/packages/vault/dist/index.js"]
+
+FROM build AS salesforce-mcp
+# Install Python 3 + pip for sf_ops.py subprocess (requests, python-dotenv)
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/sf-venv \
+    && /opt/sf-venv/bin/pip install --no-cache-dir -r /app/packages/salesforce-mcp/requirements.txt \
+    && chown -R thor:thor /opt/sf-venv
+ENV PYTHON_BIN=/opt/sf-venv/bin/python3
+ENV SF_OPS_PATH=/app/packages/salesforce-mcp/sf_ops.py
+USER thor
+ENV PORT=3005
+EXPOSE 3005
+CMD ["node", "/app/packages/salesforce-mcp/dist/index.js"]
+
+FROM build AS google-mcp
+# Install Python 3 + Google API client for sheets_ops.py / drive_ops.py
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/google-venv \
+    && /opt/google-venv/bin/pip install --no-cache-dir -r /app/packages/google-mcp/requirements.txt \
+    && chown -R thor:thor /opt/google-venv
+ENV PYTHON_BIN=/opt/google-venv/bin/python3
+ENV SHEETS_OPS_PATH=/app/packages/google-mcp/sheets_ops.py
+ENV DRIVE_OPS_PATH=/app/packages/google-mcp/drive_ops.py
+USER thor
+ENV PORT=3008
+EXPOSE 3008
+CMD ["node", "/app/packages/google-mcp/dist/index.js"]
+
 # --- Install upstream opencode from npm ---
 FROM base AS opencode
 RUN npm install -g opencode-ai@1.4.3
@@ -70,6 +111,7 @@ ENV THOR_REMOTE_CLI_URL=http://remote-cli:3004
 # OpenCode only registers QuestionTool when OPENCODE_CLIENT is "app", "cli", or "desktop".
 # https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/registry.ts
 ENV OPENCODE_CLIENT=thor
+# config/ holds agents, plugins, opencode.json, and skills in the new layout
 COPY --chown=thor:thor docker/opencode/config/ /home/thor/.config/opencode/
 ENTRYPOINT ["opencode"]
 

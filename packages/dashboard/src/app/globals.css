@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* ── Cursor-inspired design system ─────────────────────────────────── */
+:root {
+  --cursor-dark: #26251e;
+  --cursor-cream: #f2f1ed;
+  --cursor-light: #e6e5e0;
+  --s100: #f7f7f4;
+  --s300: #ebeae5;
+  --s400: #e6e5e0;
+  --s500: #e1e0db;
+  --orange: #f54e00;
+  --error: #cf2d56;
+  --success: #1f8a65;
+  --gold: #c08532;
+  --thinking: #dfa88f;
+  --grep: #9fc9a2;
+  --read: #9fbbe0;
+  --edit: #c0a8dd;
+  --border: rgba(38, 37, 30, 0.1);
+  --border-m: rgba(38, 37, 30, 0.2);
+  --text2: rgba(38, 37, 30, 0.55);
+  --text3: rgba(38, 37, 30, 0.4);
+}
+
+@theme inline {
+  --color-background: var(--cursor-cream);
+  --color-foreground: var(--cursor-dark);
+  --color-surface-100: var(--s100);
+  --color-surface-300: var(--s300);
+  --color-surface-400: var(--s400);
+  --color-surface-500: var(--s500);
+  --color-accent: var(--orange);
+  --color-success: var(--success);
+  --color-error: var(--error);
+  --color-gold: var(--gold);
+  --color-thinking: var(--thinking);
+  --color-grep: var(--grep);
+  --color-read: var(--read);
+  --color-edit: var(--edit);
+  --color-border: var(--border);
+  --color-border-m: var(--border-m);
+  --color-text-secondary: var(--text2);
+  --color-text-tertiary: var(--text3);
+}
+
+body {
+  background: var(--cursor-cream);
+  color: var(--cursor-dark);
+  font-family: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

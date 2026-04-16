@@ -1,5 +1,5 @@
-import { createLogger, logInfo, logError } from "@thor/common";
-import type { ProgressEvent } from "@thor/common";
+import { createLogger, logInfo, logError } from "@kally/common";
+import type { ProgressEvent } from "@kally/common";
 import {
   postMessage,
   updateMessage,

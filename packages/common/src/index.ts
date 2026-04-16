@@ -12,6 +12,7 @@ export {
   getRepoUpstreams,
   interpolateEnv,
   interpolateHeaders,
+  checkUserAccess,
 } from "./workspace-config.js";
 export type {
   WorkspaceConfig,
@@ -21,7 +22,19 @@ export type {
   ConfigLoader,
   GitHubAppInstallation,
   GitHubAppConfig,
+  AccessPolicy,
+  AccessUser,
+  AccessDecision,
 } from "./workspace-config.js";
+export { createVaultClient, invalidateProxyUserConnections } from "./vault-client.js";
+export type {
+  VaultClient,
+  VaultClientConfig,
+  VaultProvider,
+  VaultGetResponse,
+  VaultGetResult,
+  VaultErr,
+} from "./vault-client.js";
 export { writeToolCallLog } from "./worklog.js";
 export type { ToolCallLogEntry } from "./worklog.js";
 export { createLogger, logInfo, logWarn, logError, truncate } from "./logger.js";
@@ -42,11 +55,11 @@ export {
   extractAliases,
   getNotesLineCount,
   hasSlackReply,
-  ThorMetaSchema,
-  ThorMetaAliasSchema,
-  ThorMetaApprovalSchema,
-  extractThorMeta,
-  formatThorMeta,
+  KallyMetaSchema,
+  KallyMetaAliasSchema,
+  KallyMetaApprovalSchema,
+  extractKallyMeta,
+  formatKallyMeta,
   computeGitAlias,
   computeSlackAlias,
   inferRepoFromPath,
@@ -55,12 +68,22 @@ export {
 export type {
   ToolArtifact,
   ExtractedAlias,
-  ThorMeta,
-  ThorMetaAlias,
-  ThorMetaApproval,
+  KallyMeta,
+  KallyMetaAlias,
+  KallyMetaApproval,
 } from "./notes.js";
 export { ExecResultSchema, NdjsonChunkSchema } from "./exec-result.js";
 export type { ExecResult, NdjsonChunk } from "./exec-result.js";
+export { KallyTracer, TraceMetadataSchema, redactValue } from "./tracing.js";
+export type {
+  TraceMetadata,
+  TraceHandle,
+  StartTraceInput,
+  RecordToolInput,
+  RecordStepInput,
+  EndTraceInput,
+  KallyTracerOptions,
+} from "./tracing.js";
 export {
   ProgressStartSchema,
   ProgressToolSchema,

@@ -96,7 +96,7 @@ describe("consumeNdjsonStream (via triggerRunnerSlack)", () => {
     slackMcpDeps = { slackMcpUrl: "http://slack-mcp:3003", fetchImpl: mockSlackFetch };
 
     // Mock resolveRepoDirectory to return a directory
-    vi.mock("@thor/common", async (importOriginal) => {
+    vi.mock("@kally/common", async (importOriginal) => {
       const actual = (await importOriginal()) as Record<string, unknown>;
       return { ...actual, resolveRepoDirectory: () => "/workspace/repos/my-repo" };
     });

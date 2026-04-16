@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Set WORKLOG_DIR before importing the module
-const testDir = mkdtempSync(join(tmpdir(), "thor-notes-"));
+const testDir = mkdtempSync(join(tmpdir(), "kally-notes-"));
 process.env.WORKLOG_DIR = testDir;
 
 const {
@@ -430,7 +430,7 @@ describe("alias extraction", () => {
         {
           tool: "bash",
           input: { command: "git push origin fix/bug" },
-          output: `(no output)\n[thor:meta] ${pushMeta}\n`,
+          output: `(no output)\n[kally:meta] ${pushMeta}\n`,
         },
       ]);
 
@@ -454,11 +454,11 @@ describe("alias extraction", () => {
       ]);
 
       // slack_post_message: JSON.parse fails → skipped
-      // bash: no [thor:meta] → skipped
+      // bash: no [kally:meta] → skipped
       expect(aliases).toEqual([]);
     });
 
-    it("extracts alias from bash tool with [thor:meta]", () => {
+    it("extracts alias from bash tool with [kally:meta]", () => {
       const meta = JSON.stringify({
         type: "alias",
         alias: "git:branch:acme-project:feat/login-fix",
@@ -468,7 +468,7 @@ describe("alias extraction", () => {
         {
           tool: "bash",
           input: { command: "git push origin feat/login-fix" },
-          output: `Everything up-to-date\n[thor:meta] ${meta}\n`,
+          output: `Everything up-to-date\n[kally:meta] ${meta}\n`,
         },
       ]);
 
@@ -480,7 +480,7 @@ describe("alias extraction", () => {
       ]);
     });
 
-    it("extracts multiple [thor:meta] entries from single bash output", () => {
+    it("extracts multiple [kally:meta] entries from single bash output", () => {
       const meta1 = JSON.stringify({
         type: "alias",
         alias: "git:branch:repo:feat/a",
@@ -495,7 +495,7 @@ describe("alias extraction", () => {
         {
           tool: "bash",
           input: { command: "some compound command" },
-          output: `output\n[thor:meta] ${meta1}\nmore\n[thor:meta] ${meta2}\n`,
+          output: `output\n[kally:meta] ${meta1}\nmore\n[kally:meta] ${meta2}\n`,
         },
       ]);
 
@@ -504,7 +504,7 @@ describe("alias extraction", () => {
       expect(aliases[1].alias).toBe("git:branch:repo:feat/b");
     });
 
-    it("extracts slack thread alias from bash tool with [thor:meta]", () => {
+    it("extracts slack thread alias from bash tool with [kally:meta]", () => {
       const meta = JSON.stringify({
         type: "alias",
         alias: "slack:thread:1712345678.123",
@@ -514,7 +514,7 @@ describe("alias extraction", () => {
         {
           tool: "bash",
           input: { command: "mcp slack post_message ..." },
-          output: `posted\n[thor:meta] ${meta}\n`,
+          output: `posted\n[kally:meta] ${meta}\n`,
         },
       ]);
 
@@ -526,7 +526,7 @@ describe("alias extraction", () => {
       ]);
     });
 
-    it("skips bash tool output without [thor:meta]", () => {
+    it("skips bash tool output without [kally:meta]", () => {
       const aliases = extractAliases([
         {
           tool: "bash",
@@ -538,26 +538,26 @@ describe("alias extraction", () => {
       expect(aliases).toEqual([]);
     });
 
-    it("skips malformed [thor:meta] in bash output", () => {
+    it("skips malformed [kally:meta] in bash output", () => {
       const aliases = extractAliases([
         {
           tool: "bash",
           input: { command: "git push origin main" },
-          output: "Everything up-to-date\n[thor:meta] not-json\n",
+          output: "Everything up-to-date\n[kally:meta] not-json\n",
         },
       ]);
 
       expect(aliases).toEqual([]);
     });
 
-    it("skips [thor:meta] missing required fields", () => {
+    it("skips [kally:meta] missing required fields", () => {
       // Missing "type" discriminant → rejected by schema
       const meta = JSON.stringify({ alias: "git:branch:repo:main", context: "git push" });
       const aliases = extractAliases([
         {
           tool: "bash",
           input: { command: "git push origin main" },
-          output: `ok\n[thor:meta] ${meta}\n`,
+          output: `ok\n[kally:meta] ${meta}\n`,
         },
       ]);
 
@@ -575,7 +575,7 @@ describe("alias extraction", () => {
         {
           tool: "bash",
           input: { command: "mcp atlassian createJiraIssue ..." },
-          output: `Approval required\n[thor:meta] ${meta}\n`,
+          output: `Approval required\n[kally:meta] ${meta}\n`,
         },
       ]);
 
@@ -628,7 +628,7 @@ describe("hasSlackReply", () => {
       durationMs: 1000,
       toolCalls: [{ tool: "bash", state: "completed" }],
     });
-    // Follow-up: Thor replies in Slack
+    // Follow-up: Kally replies in Slack
     appendTrigger({ correlationKey: key, prompt: "follow up" });
     registerAlias({
       correlationKey: key,

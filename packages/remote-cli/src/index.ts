@@ -4,12 +4,12 @@ import {
   computeGitAlias,
   createConfigLoader,
   createLogger,
-  formatThorMeta,
+  formatKallyMeta,
   logError,
   logInfo,
   type ConfigLoader,
   WORKSPACE_CONFIG_PATH,
-} from "@thor/common";
+} from "@kally/common";
 import { execCommand, execCommandStream } from "./exec.js";
 import { createMcpService, type McpServiceDeps } from "./mcp-handler.js";
 import { listSchemas, listTables, getColumns, executeQuery } from "./metabase.js";
@@ -37,12 +37,22 @@ export interface RemoteCliApp {
   close(): Promise<void>;
 }
 
-function thorIds(req: express.Request): { sessionId?: string; callId?: string } {
+/** Extract tracing IDs and per-user identity from request headers. */
+function thorIds(req: express.Request): {
+  sessionId?: string;
+  callId?: string;
+  user_id?: string;
+  user_email?: string;
+} {
   const sessionId = req.headers["x-thor-session-id"] as string | undefined;
   const callId = req.headers["x-thor-call-id"] as string | undefined;
+  const user_id = req.headers["x-kally-user-slack-id"] as string | undefined;
+  const user_email = req.headers["x-kally-user-email"] as string | undefined;
   return {
     ...(sessionId && { sessionId }),
     ...(callId && { callId }),
+    ...(user_id && { user_id }),
+    ...(user_email && { user_email }),
   };
 }
 
@@ -91,7 +101,7 @@ export function createRemoteCliApp(config: RemoteCliAppConfig = {}): RemoteCliAp
       const result = await execCommand("git", args, cwd);
       if ((result.exitCode ?? 0) === 0) {
         const alias = computeGitAlias("git", args, cwd);
-        if (alias) result.stdout = (result.stdout || "") + formatThorMeta(alias);
+        if (alias) result.stdout = (result.stdout || "") + formatKallyMeta(alias);
       }
       res.json(result);
     } catch (err) {
@@ -125,7 +135,7 @@ export function createRemoteCliApp(config: RemoteCliAppConfig = {}): RemoteCliAp
       const result = await execCommand("gh", args, cwd);
       if ((result.exitCode ?? 0) === 0) {
         const alias = computeGitAlias("gh", args, cwd);
-        if (alias) result.stdout = (result.stdout || "") + formatThorMeta(alias);
+        if (alias) result.stdout = (result.stdout || "") + formatKallyMeta(alias);
       }
       res.json(result);
     } catch (err) {

@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { createLogger, logError, logInfo } from "@thor/common";
+import { createLogger, logError, logInfo } from "@kally/common";
 
 const log = createLogger("mcp");
 
