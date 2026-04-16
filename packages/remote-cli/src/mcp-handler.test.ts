@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import type { WorkspaceConfig } from "@thor/common";
+import type { WorkspaceConfig } from "@kally/common";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { createRemoteCliApp } from "./index.js";
 import type { UpstreamConnection } from "./upstream.js";
@@ -46,6 +46,8 @@ describe("remote-cli MCP endpoints", () => {
         proxies: ["slack"],
       },
     },
+    support_team_emails: [],
+    katalon_email_suffixes: ["@katalon.com"],
     proxies: {
       slack: {
         upstream: { url: "http://example.test/mcp" },

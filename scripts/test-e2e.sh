@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end test for Thor.
+# End-to-end test for Kally.
 #
 # Tests the full chain: curl -> runner -> OpenCode service -> remote-cli -> MCP servers
 #
@@ -102,6 +102,18 @@ assert '[[ "$remote_cli_health" == *"ok"* ]]' "remote-cli is healthy" "got: $rem
 runner_health=$(curl -sf "$RUNNER_URL/health" 2>/dev/null || echo '{}')
 assert '[[ "$runner_health" == *"ok"* ]]' "Runner is healthy" "got: $runner_health"
 
+VAULT_URL="${VAULT_URL:-http://localhost:3006}"
+vault_health=$(curl -sf "$VAULT_URL/health" 2>/dev/null || echo '{}')
+assert '[[ "$vault_health" == *"ok"* ]]' "vault is healthy" "got: $vault_health"
+
+SALESFORCE_MCP_URL="${SALESFORCE_MCP_URL:-http://localhost:3005}"
+salesforce_mcp_health=$(curl -sf "$SALESFORCE_MCP_URL/health" 2>/dev/null || echo '{}')
+assert '[[ "$salesforce_mcp_health" == *"ok"* ]]' "salesforce-mcp is healthy" "got: $salesforce_mcp_health"
+
+GOOGLE_MCP_URL="${GOOGLE_MCP_URL:-http://localhost:3008}"
+google_mcp_health=$(curl -sf "$GOOGLE_MCP_URL/health" 2>/dev/null || echo '{}')
+assert '[[ "$google_mcp_health" == *"ok"* ]]' "google-mcp is healthy" "got: $google_mcp_health"
+
 # ── 2. Session resume via correlation key ────────────────────────────────────
 
 echo ""
@@ -110,7 +122,7 @@ echo "=== Session Resume ==="
 CORR_KEY="e2e-test-$(date +%s)"
 
 # Generate a random phrase so the agent can only know it from trigger #1
-PHRASE="THOR$(date +%s | tail -c 6)"
+PHRASE="KALLY$(date +%s | tail -c 6)"
 
 # 2a. First trigger — tell the agent a phrase to remember
 echo "  Sending trigger #1 (new session — planting phrase: $PHRASE)..."
@@ -255,7 +267,7 @@ else
     -d "{\"args\":[\"$APPROVAL_UPSTREAM\",\"$APPROVAL_TOOL\",\"{}\"],\"cwd\":\"$APPROVAL_DIR\",\"directory\":\"$APPROVAL_DIR\"}" \
     2>/dev/null || echo '{}')
 
-  # Parse action ID — check stdout, stderr (thor:meta), and content (legacy MCP format)
+  # Parse action ID — check stdout, stderr (kally:meta), and content (legacy MCP format)
   action_id=$(echo "$call_raw" | node -e "
     const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
     const parts = [d.stdout || '', d.stderr || ''];

@@ -1,6 +1,6 @@
 # Memory Tiers Plan — 2026-03-10-01
 
-> Give Thor persistent memory so it builds on prior work instead of starting from scratch each time. Demonstrate the "AI team member who keeps notes" behavior for stakeholder demo.
+> Give Kally persistent memory so it builds on prior work instead of starting from scratch each time. Demonstrate the "AI team member who keeps notes" behavior for stakeholder demo.
 
 ## Decision Log
 
@@ -177,5 +177,5 @@ Steps:
 | Dependency                 | Version | Purpose                      | Status   |
 | -------------------------- | ------- | ---------------------------- | -------- |
 | `@opencode-ai/sdk`         | ^1.2.22 | Session resume, message list | Existing |
-| `@thor/common`             | —       | Notes utilities              | Existing |
+| `@kally/common`            | —       | Notes utilities              | Existing |
 | No new dependencies needed | —       | —                            | —        |

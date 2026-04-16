@@ -20,7 +20,7 @@ import {
   SlackProgressRequestSchema,
   SlackReactionRequestSchema,
   SlackApprovalRequestSchema,
-} from "@thor/common";
+} from "@kally/common";
 import {
   postMessage,
   updateMessage,
@@ -30,6 +30,7 @@ import {
   addReaction,
   type SlackDeps,
   type SlackFileReadResult,
+  type SlackBlock,
 } from "./slack.js";
 import { handleProgressEvent, onBotReply } from "./progress-manager.js";
 import { buildInlineApprovalBlocks, formatApprovalArgs } from "./approval.js";
@@ -40,9 +41,23 @@ const PORT = parseInt(process.env.PORT || "3003", 10);
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const getConfig = createConfigLoader(WORKSPACE_CONFIG_PATH);
 
-/** Check channel allowlist dynamically — re-reads config.json on each request. */
-const isChannelAllowed = (channel: string): boolean =>
-  getAllowedChannelIds(getConfig()).has(channel);
+/**
+ * Channel allowlist — TEMPORARILY DISABLED to match the gateway-side gate
+ * being off. Slack's `/invite @Kally` is the implicit gate for now; any
+ * channel Kally has been added to can receive progress updates, reactions,
+ * and tool-initiated posts.
+ *
+ * To re-enable strict allow-listing, uncomment the original body below and
+ * remove the unconditional `return true`. The call sites (post_message,
+ * /progress, /reaction) are all still wired, so flipping this is a
+ * one-line change.
+ */
+const isChannelAllowed = (_channel: string): boolean => {
+  // return getAllowedChannelIds(getConfig()).has(_channel);
+  void getAllowedChannelIds;
+  void getConfig;
+  return true;
+};
 
 if (!SLACK_BOT_TOKEN) {
   logError(log, "missing_env", "SLACK_BOT_TOKEN is required");
@@ -60,15 +75,26 @@ const slackDeps: SlackDeps = {
 const tools: Tool[] = [
   {
     name: "post_message",
-    description: "Post a message to a Slack channel or thread. Use thread_ts to reply in a thread.",
+    description:
+      "Post a message to a Slack channel or thread. Use thread_ts to reply in a thread. Pass optional blocks for Block Kit formatting (required when you need a model footer — see agent instructions).",
     inputSchema: {
       type: "object" as const,
       properties: {
         channel: { type: "string", description: "Channel ID (e.g. C0123456789)" },
-        text: { type: "string", description: "Message text (supports Slack mrkdwn)" },
+        text: {
+          type: "string",
+          description:
+            "Message text (supports Slack mrkdwn). Used as the fallback when blocks are provided — must still be set to a human-readable summary for notifications.",
+        },
         thread_ts: {
           type: "string",
           description: "Thread timestamp to reply in (optional)",
+        },
+        blocks: {
+          type: "array",
+          description:
+            "Slack Block Kit blocks array (optional). When provided, Slack renders these instead of the text field. Use for model-footer context blocks, rich layouts, etc. Each element is a Block Kit block object.",
+          items: { type: "object" },
         },
       },
       required: ["channel", "text"],
@@ -108,14 +134,15 @@ const tools: Tool[] = [
   {
     name: "get_slack_file",
     description:
-      "Fetch a Slack file by file_id. Returns text content for text-like files or image content for photos.",
+      "Fetch a Slack file by file_id. Handles many formats: images (returned as vision content), text files (.txt, .md, .csv, .json, .yaml, .log, .sql, .py, .js, .ts, .java, .groovy, .sh, .dockerfile, .toml, .ini, .properties, .diff, .patch, and more), PDF (text extracted server-side), ZIP (manifest + inlined small text entries), and any binary that decodes as clean UTF-8.",
     inputSchema: {
       type: "object" as const,
       properties: {
         file_id: { type: "string", description: "Slack file ID (e.g. F0123456789)" },
         max_bytes: {
           type: "number",
-          description: "Maximum file size to download in bytes (default 5000000, max 20000000)",
+          description:
+            "Maximum file size to download in bytes (default 5000000 = 5MB, max 50000000 = 50MB). Raise for PDFs, log bundles, or large ZIP archives. Keep low for images — vision tokens scale with image bytes.",
         },
       },
       required: ["file_id"],
@@ -146,7 +173,8 @@ async function handleToolCall(
           isError: true,
         };
       }
-      const result = await postMessage(channel, text, threadTs, slackDeps);
+      const blocks = args.blocks as SlackBlock[] | undefined;
+      const result = await postMessage(channel, text, threadTs, slackDeps, blocks);
       // Auto-delete progress message if bot replies to a thread with active progress
       if (threadTs) {
         void onBotReply(channel, threadTs);
@@ -182,7 +210,7 @@ async function handleToolCall(
 
     case "get_slack_file": {
       const fileId = String(args.file_id);
-      const maxBytes = Math.min(Number(args.max_bytes) || 5_000_000, 20_000_000);
+      const maxBytes = Math.min(Number(args.max_bytes) || 5_000_000, 50_000_000);
       const file = await readSlackFile(fileId, maxBytes, slackDeps);
       return {
         content: toSlackFileToolContent(file),
@@ -226,7 +254,7 @@ function toSlackFileToolContent(file: SlackFileReadResult): CallToolResult["cont
 
 function createSlackMcpServer(): Server {
   const server = new Server(
-    { name: "thor-slack-mcp", version: "0.0.1" },
+    { name: "kally-slack-mcp", version: "0.0.1" },
     { capabilities: { tools: {} } },
   );
 
