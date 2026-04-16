@@ -24,6 +24,7 @@ COPY packages/salesforce-mcp/package.json packages/salesforce-mcp/
 COPY packages/remote-cli/package.json packages/remote-cli/
 COPY packages/opencode-cli/package.json packages/opencode-cli/
 COPY packages/vault/package.json packages/vault/
+COPY packages/google-mcp/package.json packages/google-mcp/
 RUN pnpm install --frozen-lockfile
 
 # --- Build all packages ---
@@ -80,6 +81,22 @@ USER kally
 ENV PORT=3005
 EXPOSE 3005
 CMD ["node", "/app/packages/salesforce-mcp/dist/index.js"]
+
+FROM build AS google-mcp
+# Install Python 3 + Google API client for sheets_ops.py / drive_ops.py
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/google-venv \
+    && /opt/google-venv/bin/pip install --no-cache-dir -r /app/packages/google-mcp/requirements.txt \
+    && chown -R kally:kally /opt/google-venv
+ENV PYTHON_BIN=/opt/google-venv/bin/python3
+ENV SHEETS_OPS_PATH=/app/packages/google-mcp/sheets_ops.py
+ENV DRIVE_OPS_PATH=/app/packages/google-mcp/drive_ops.py
+USER kally
+ENV PORT=3008
+EXPOSE 3008
+CMD ["node", "/app/packages/google-mcp/dist/index.js"]
 
 # --- Install upstream opencode from npm ---
 FROM base AS opencode
