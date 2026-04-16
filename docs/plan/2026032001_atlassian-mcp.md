@@ -1,7 +1,7 @@
 # Plan: Atlassian MCP Integration
 
 **Date**: 2026-03-20
-**Goal**: Add Atlassian MCP (Jira, Confluence, JSM) to Thor via the existing proxy, same pattern as PostHog.
+**Goal**: Add Atlassian MCP (Jira, Confluence, JSM) to Kally via the existing proxy, same pattern as PostHog.
 
 ## Context
 

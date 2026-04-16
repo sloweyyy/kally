@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConfigLoader, WorkspaceConfig } from "@thor/common";
+import type { ConfigLoader, WorkspaceConfig } from "@kally/common";
 import { createGatewayApp, type GatewayAppConfig } from "./app.js";
 import type { EventQueue } from "./queue.js";
 
@@ -29,8 +29,8 @@ function fakeConfigLoader(
 }
 
 let mockHasSlackReply = false;
-vi.mock("@thor/common", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@thor/common")>();
+vi.mock("@kally/common", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@kally/common")>();
   return {
     ...actual,
     resolveRepoDirectory: (repoName: string) => `/workspace/repos/${repoName}`,
@@ -396,6 +396,15 @@ describe("gateway", () => {
       expect(triggerCall).toBeDefined();
       const triggerBody = JSON.parse(String(triggerCall![1]?.body));
       expect(triggerBody.correlationKey).toBe("slack:thread:1710000000.001");
+      // Trace metadata carries the triggering user's identity and event source.
+      // user_email is omitted here because no resolver is wired in the test —
+      // the gateway degrades to uid-only. Phase 1 identity plumbing.
+      expect(triggerBody.metadata).toMatchObject({
+        event_source: "slack",
+        event_type: "app_mention",
+        channel_id: "C123",
+        user_id: "U123",
+      });
       const promptJson = triggerBody.prompt.split("\n\n").slice(1).join("\n\n");
       const promptPayload = JSON.parse(promptJson);
       expect(promptPayload.type).toBe("app_mention");
@@ -404,7 +413,7 @@ describe("gateway", () => {
     });
   });
 
-  it("ignores thread replies in unengaged threads (Thor has not replied)", async () => {
+  it("ignores thread replies in unengaged threads (Kally has not replied)", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     mockHasSlackReply = false;
 
@@ -444,7 +453,7 @@ describe("gateway", () => {
     });
   });
 
-  it("enqueues thread replies in engaged threads (Thor has replied before)", async () => {
+  it("enqueues thread replies in engaged threads (Kally has replied before)", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
       // POST /trigger → 200 (fire-and-forget)
@@ -850,22 +859,34 @@ describe("gateway", () => {
     });
   });
 
-  it("ignores events from channels not in the allowlist", async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
+  // Channel allowlist is temporarily disabled in app.ts — see the commented
+  // isChannelAllowed block there. Kally now responds in any public channel
+  // it has been added to (Slack's /invite is the implicit gate). When the
+  // allowlist is re-enabled, flip this test back to expecting `ignored: true`.
+  it("accepts events from any channel when the allowlist is disabled", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/reaction") || String(url).endsWith("/trigger")) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
 
     await withServer(
       fetchImpl,
-      async (baseUrl) => {
+      async (baseUrl, queue) => {
         const body = JSON.stringify({
           type: "event_callback",
-          event_id: "EvBlocked",
+          event_id: "EvAllowed",
           team_id: "T123",
           event: {
             type: "app_mention",
             user: "U123",
             text: "<@U999> hello",
             ts: "1710000000.050",
-            channel: "C_NOT_ALLOWED",
+            channel: "C_NOT_IN_CONFIG",
           },
         });
         const timestamp = `${Math.floor(Date.now() / 1000)}`;
@@ -881,8 +902,9 @@ describe("gateway", () => {
         });
 
         expect(response.status).toBe(200);
-        expect(await response.json()).toEqual({ ok: true, ignored: true });
-        expect(fetchImpl).not.toHaveBeenCalled();
+        // ACK is bare {ok:true}, no "ignored" marker — the event was accepted
+        expect(await response.json()).toEqual({ ok: true });
+        await queue.flush();
       },
       { getConfig: fakeConfigLoader(["C_ALLOWED"]) },
     );

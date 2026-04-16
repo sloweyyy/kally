@@ -6,11 +6,11 @@
 
 ## Problem
 
-When a user triggers Thor via Slack, the only feedback is the initial "eyes" reaction. If the OpenCode session takes a long time (many tool calls, large codebase exploration), the user has no visibility into what's happening. They don't know if Thor is stuck, working hard, or almost done.
+When a user triggers Kally via Slack, the only feedback is the initial "eyes" reaction. If the OpenCode session takes a long time (many tool calls, large codebase exploration), the user has no visibility into what's happening. They don't know if Kally is stuck, working hard, or almost done.
 
 ## Goal
 
-Stream progress updates from the runner back to the originating Slack thread as a single, self-updating message. The message shows what Thor is currently doing and updates in-place to avoid thread noise.
+Stream progress updates from the runner back to the originating Slack thread as a single, self-updating message. The message shows what Kally is currently doing and updates in-place to avoid thread noise.
 
 ## Design
 

@@ -16,7 +16,7 @@ import {
   loadWorkspaceConfig,
   WORKSPACE_CONFIG_PATH,
   type GitHubAppInstallation,
-} from "@thor/common";
+} from "@kally/common";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

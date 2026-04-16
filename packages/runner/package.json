@@ -1,5 +1,5 @@
 {
-  "name": "@thor/runner",
+  "name": "@kally/runner",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.4.3",
-    "@thor/common": "workspace:*",
+    "@kally/common": "workspace:*",
     "express": "^5.1.0",
     "zod": "^4.3.6"
   },

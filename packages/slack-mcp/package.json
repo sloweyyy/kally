@@ -1,5 +1,5 @@
 {
-  "name": "@thor/slack-mcp",
+  "name": "@kally/slack-mcp",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,16 +11,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@kally/common": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@slack/types": "2.20.1",
     "@slack/web-api": "^7.15.1",
-    "@thor/common": "workspace:*",
+    "adm-zip": "^0.5.17",
     "express": "^5.1.0",
+    "pdf-parse": "^2.4.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/express": "^5.0.2",
     "@types/node": "^22.13.10",
+    "@types/pdf-parse": "^1.1.5",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

@@ -8,7 +8,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@thor/common": resolve(__dirname, "packages/common/src/index.ts"),
+      "@kally/common": resolve(__dirname, "packages/common/src/index.ts"),
     },
   },
 });

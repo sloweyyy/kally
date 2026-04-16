@@ -21,5 +21,8 @@ test.sh
 .idea/
 .vscode/
 
-# Thor
+# Kally
 /docker-volumes/
+
+# Claude Code local settings (per-machine)
+.claude/
