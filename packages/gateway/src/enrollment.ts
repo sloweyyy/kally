@@ -288,6 +288,11 @@ export function extractInputValues(view: unknown): Record<string, string> {
 
 export interface SlackWebClient {
   viewsOpen(trigger_id: string, view: SlackView): Promise<{ ok: boolean; error?: string }>;
+  viewsUpdate(
+    view_id: string,
+    view: SlackView,
+    hash?: string,
+  ): Promise<{ ok: boolean; error?: string }>;
   chatPostMessageDM(
     slack_uid: string,
     text: string,
@@ -341,6 +346,9 @@ export function createSlackWebClient(opts: CreateSlackWebClientOptions): SlackWe
   return {
     viewsOpen(trigger_id, view) {
       return post("views.open", { trigger_id, view });
+    },
+    viewsUpdate(view_id, view, hash) {
+      return post("views.update", { view_id, view, ...(hash && { hash }) });
     },
     async chatPostMessageDM(slack_uid, text, blocks) {
       // conversations.open with a user id returns a DM channel we can post into.
