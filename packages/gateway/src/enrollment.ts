@@ -124,6 +124,21 @@ export function salesforceModal(): SlackView {
         "Your Salesforce login email.",
         "you@katalon.com",
       ),
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text:
+            "*How to get your 25-char security token:*\n" +
+            "The security token is a 25-character string Salesforce emails to you on demand. " +
+            "You need it because Kally's login comes from a container, not from your usual browser IP.\n\n" +
+            "1. Log into Salesforce in your browser.\n" +
+            "2. Go to <https://katalon-inc.my.salesforce.com/_ui/system/security/ResetApiTokenEdit|Reset My Security Token>.\n" +
+            "3. Click *Reset Security Token*. Salesforce sends the token to your Katalon email.\n" +
+            "4. Open the email, copy the 25-char string.\n" +
+            "5. In the field below, paste `<your password><that token>` — concatenated with no separator.",
+        },
+      },
       textInput(
         "sf_password",
         "v",
