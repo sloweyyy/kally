@@ -58,6 +58,7 @@ export const SlackUrlVerificationSchema = z.object({
 
 export const SlackInteractivityPayloadSchema = z.object({
   type: z.string().optional(),
+  trigger_id: z.string().optional(),
   user: z
     .object({
       id: z.string(),
@@ -80,6 +81,12 @@ export const SlackInteractivityPayloadSchema = z.object({
   message: z
     .object({
       ts: z.string(),
+    })
+    .optional(),
+  view: z
+    .object({
+      id: z.string().optional(),
+      hash: z.string().optional(),
     })
     .optional(),
 });
