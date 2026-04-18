@@ -37,11 +37,13 @@ import {
   type SlackUserResolver,
 } from "./slack-users.js";
 import {
+  atlassianModal,
   createSlackWebClient,
   handleSubmission,
   openEnrollmentModal,
   parseCommandText,
   parseSlashCommand,
+  salesforceModal,
   type SlackWebClient,
 } from "./enrollment.js";
 import type { VaultClient } from "@kally/common";
@@ -529,6 +531,33 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
               const decisionLabel = decision.charAt(0).toUpperCase() + decision.slice(1);
               const text = `${statusEmoji} *${decisionLabel}* by <@${reviewer}>`;
               await updateSlackMessage(channel, messageTs, text, slackMcpDeps);
+            }
+          })();
+          return;
+        }
+
+        // Handle the /kally connect picker modal — two buttons pick a provider
+        // and swap the modal contents to that provider's credential form via
+        // views.update (Slack requires view_id + hash to prevent clobbering).
+        if (
+          action.action_id === "connect_pick_salesforce" ||
+          action.action_id === "connect_pick_atlassian"
+        ) {
+          const viewId = payload.view?.id;
+          const viewHash = payload.view?.hash;
+          if (!slackWeb || !viewId) {
+            logError(log, "picker_update_failed", "slackWeb or view_id missing");
+            res.status(200).json({ ok: true });
+            return;
+          }
+          const nextView =
+            action.action_id === "connect_pick_salesforce" ? salesforceModal() : atlassianModal();
+
+          res.status(200).json({ ok: true });
+          void (async () => {
+            const result = await slackWeb.viewsUpdate(viewId, nextView, viewHash);
+            if (!result.ok) {
+              logError(log, "picker_update_error", result.error ?? "unknown");
             }
           })();
           return;
