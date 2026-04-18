@@ -100,8 +100,13 @@ services:
     depends_on:
       slack-mcp:
         condition: service_healthy
-      grafana-mcp:
+      salesforce-mcp:
         condition: service_healthy
+      google-mcp:
+        condition: service_healthy
+      # grafana-mcp disabled for local dev
+      # grafana-mcp:
+      #   condition: service_healthy
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>{if(!r.ok)throw 1})"]
