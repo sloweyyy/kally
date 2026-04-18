@@ -37,22 +37,24 @@ export interface RemoteCliApp {
   close(): Promise<void>;
 }
 
-/** Extract tracing IDs and per-user identity from request headers. */
+/** Extract tracing IDs and per-user identity from request headers.
+ *  Field names match `McpCommandContext` so callers can spread the result
+ *  directly into the context passed to executeMcp/executeApproval. */
 function thorIds(req: express.Request): {
   sessionId?: string;
   callId?: string;
-  user_id?: string;
-  user_email?: string;
+  userSlackId?: string;
+  userEmail?: string;
 } {
   const sessionId = req.headers["x-thor-session-id"] as string | undefined;
   const callId = req.headers["x-thor-call-id"] as string | undefined;
-  const user_id = req.headers["x-kally-user-slack-id"] as string | undefined;
-  const user_email = req.headers["x-kally-user-email"] as string | undefined;
+  const userSlackId = req.headers["x-kally-user-slack-id"] as string | undefined;
+  const userEmail = req.headers["x-kally-user-email"] as string | undefined;
   return {
     ...(sessionId && { sessionId }),
     ...(callId && { callId }),
-    ...(user_id && { user_id }),
-    ...(user_email && { user_email }),
+    ...(userSlackId && { userSlackId }),
+    ...(userEmail && { userEmail }),
   };
 }
 

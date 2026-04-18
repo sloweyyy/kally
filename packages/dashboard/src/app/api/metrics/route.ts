@@ -80,8 +80,9 @@ export async function GET() {
       const displayUser = userEmail || userId || "unknown";
       if (displayUser !== "unknown") {
         usagePerUser[displayUser] = (usagePerUser[displayUser] || 0) + 1;
-        if (run.total_cost) {
-          costPerUser[displayUser] = (costPerUser[displayUser] || 0) + (run.total_cost ?? 0);
+        const runCost = (run as unknown as { total_cost?: number }).total_cost;
+        if (typeof runCost === "number") {
+          costPerUser[displayUser] = (costPerUser[displayUser] || 0) + runCost;
         }
       }
 
