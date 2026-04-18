@@ -107,6 +107,10 @@ COPY docker/opencode/bin/approval /usr/local/bin/approval
 USER thor
 RUN mkdir -p /home/thor/.local/share/opencode /home/thor/.local/state
 ENV THOR_REMOTE_CLI_URL=http://remote-cli:3004
+# Alias for kally-named scripts (e.g. opencode-cli's remote-cli.mjs).
+# Both env vars point at the same service so upstream Thor CLI wrappers
+# AND our kally-branded wrappers resolve the same URL without divergence.
+ENV KALLY_REMOTE_CLI_URL=http://remote-cli:3004
 # Disable the question tool — it requires an interactive client to answer.
 # OpenCode only registers QuestionTool when OPENCODE_CLIENT is "app", "cli", or "desktop".
 # https://github.com/sst/opencode/blob/main/packages/opencode/src/tool/registry.ts
