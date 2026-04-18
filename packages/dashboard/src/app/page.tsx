@@ -266,11 +266,13 @@ export default function Dashboard() {
                 <span className="flex-1">{s.name}</span>
                 <span className="text-[0.63rem] text-[var(--text3)]">
                   {s.ok
-                    ? (s.data as Record<string, unknown>)?.tools
-                      ? `${(s.data as Record<string, unknown>).tools} tools`
-                      : (s.data as Record<string, unknown>)?.connected
-                        ? `${(s.data as Record<string, unknown>).connected} upstreams`
-                        : (s.data as Record<string, unknown>)?.opencode || "ok"
+                    ? (() => {
+                        const data = (s.data ?? {}) as Record<string, unknown>;
+                        if (typeof data.tools === "number") return `${data.tools} tools`;
+                        if (typeof data.connected === "number") return `${data.connected} upstreams`;
+                        if (typeof data.opencode === "string") return data.opencode;
+                        return "ok";
+                      })()
                     : "down"}
                 </span>
               </div>

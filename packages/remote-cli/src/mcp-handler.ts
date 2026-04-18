@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import {
+  checkUserAccess,
   computeSlackAlias,
   createLogger,
   extractRepoFromCwd,
@@ -48,6 +49,12 @@ export interface McpCommandContext {
   sessionId?: string;
   callId?: string;
   resolveSecret?: string;
+  /** Slack UID forwarded from the gateway (x-kally-user-slack-id). Used by
+   *  checkUserAccess to enforce per-upstream `access` policies. */
+  userSlackId?: string;
+  /** Email forwarded from the gateway (x-kally-user-email). Primary key for
+   *  support/katalon policy membership. */
+  userEmail?: string;
 }
 
 export interface McpServiceDeps {
@@ -130,10 +137,17 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     return deps.getConfig();
   }
 
-  function getThorIds(context: McpCommandContext): { sessionId?: string; callId?: string } {
+  function getThorIds(context: McpCommandContext): {
+    sessionId?: string;
+    callId?: string;
+    userSlackId?: string;
+    userEmail?: string;
+  } {
     return {
       ...(context.sessionId && { sessionId: context.sessionId }),
       ...(context.callId && { callId: context.callId }),
+      ...(context.userSlackId && { userSlackId: context.userSlackId }),
+      ...(context.userEmail && { userEmail: context.userEmail }),
     };
   }
 
@@ -431,6 +445,27 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     const instance = await getInstance(upstreamName);
     if (!instance) {
       return fail(`Unknown upstream "${upstreamName}".`);
+    }
+
+    // Enforce the proxy's access policy using the caller identity forwarded
+    // from the gateway via x-kally-user-* headers. Policy values: "public"
+    // (default, no-op), "katalon" (email must match a configured suffix),
+    // "support" (email must be on the support_team_emails list).
+    const proxy = getConfig().proxies?.[upstreamName];
+    if (proxy) {
+      const decision = checkUserAccess(getConfig(), proxy, {
+        user_id: context.userSlackId,
+        user_email: context.userEmail,
+      });
+      if (!decision.ok) {
+        logWarn(log, "tool_call_access_denied", {
+          upstream: upstreamName,
+          tool: toolInfo.name,
+          reason: decision.reason,
+          ...getThorIds(context),
+        });
+        return fail(`access_denied: ${decision.reason} — ${decision.message}\n`);
+      }
     }
 
     if (toolInfo.classification === "approve") {

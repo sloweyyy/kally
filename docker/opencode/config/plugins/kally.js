@@ -2,7 +2,7 @@
  * Kally OpenCode plugin — injects trusted env vars into every shell execution.
  *
  * Hooks into `shell.env` so that CLI wrappers (mcp, approval, git, gh) receive
- * KALLY_OPENCODE_DIRECTORY and KALLY_OPENCODE_SESSION_ID from OpenCode's own
+ * THOR_OPENCODE_DIRECTORY and THOR_OPENCODE_SESSION_ID from OpenCode's own
  * context rather than trusting process.cwd() which the LLM can change via `cd`.
  *
  * Also injects the triggering user's identity (KALLY_USER_SLACK_ID,
@@ -21,9 +21,9 @@ const USER_FILE_BASE = "/workspace/memory/sessions";
 export const KallyPlugin = async (plugin) => {
   return {
     "shell.env": async (hook, output) => {
-      output.env.KALLY_OPENCODE_DIRECTORY = plugin.directory;
+      output.env.THOR_OPENCODE_DIRECTORY = plugin.directory;
       if (hook.sessionID) {
-        output.env.KALLY_OPENCODE_SESSION_ID = hook.sessionID;
+        output.env.THOR_OPENCODE_SESSION_ID = hook.sessionID;
         // Best-effort per-session user lookup. Failures stay silent — the
         // proxy logs missing identity itself, no need to scream from here.
         try {
@@ -38,7 +38,7 @@ export const KallyPlugin = async (plugin) => {
         }
       }
       if (hook.callID) {
-        output.env.KALLY_OPENCODE_CALL_ID = hook.callID;
+        output.env.THOR_OPENCODE_CALL_ID = hook.callID;
       }
     },
   };
