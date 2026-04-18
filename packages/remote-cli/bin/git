@@ -32,6 +32,7 @@ if [ -n "$AUTH_JSON" ]; then
 
     trap 'rm -f "$ASKPASS_SCRIPT"' EXIT
     "$REAL_GIT" "$@"
+    exit $?
   fi
 fi
 
