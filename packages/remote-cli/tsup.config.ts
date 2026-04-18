@@ -8,7 +8,7 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  noExternal: [/@thor\/.*/],
+  noExternal: [/@kally\/.*/],
   banner: {
     js: 'import{createRequire as __cr}from"node:module";const require=__cr(import.meta.url);',
   },
