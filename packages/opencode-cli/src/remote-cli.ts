@@ -42,8 +42,8 @@ try {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(sessionId && { "x-kally-session-id": sessionId }),
-      ...(callId && { "x-kally-call-id": callId }),
+      ...(sessionId && { "x-thor-session-id": sessionId }),
+      ...(callId && { "x-thor-call-id": callId }),
       ...(userSlackId && { "x-kally-user-slack-id": userSlackId }),
       ...(userEmail && { "x-kally-user-email": userEmail }),
     },
