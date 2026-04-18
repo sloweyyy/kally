@@ -195,14 +195,14 @@ services:
     working_dir: /workspace
     command: ["serve", "--port", "4096", "--hostname", "0.0.0.0"]
     volumes:
-      - ./docker-volumes/opencode:/home/kally/.local/share/opencode
+      - ./docker-volumes/opencode:/home/thor/.local/share/opencode
       - ./docker-volumes/workspace/memory:/workspace/memory
       - ./docker-volumes/workspace/repos:/workspace/repos:ro
       - ./docker-volumes/workspace/worklog:/workspace/worklog:ro
       - ./docker-volumes/workspace/cron:/workspace/cron
       - ./docker-volumes/workspace/worktrees:/workspace/worktrees
       # Share host opencode auth (all providers: anthropic, openai, codex, google, etc.)
-      - ${HOME}/.local/share/opencode/auth.json:/home/kally/.local/share/opencode/auth.json
+      - ${HOME}/.local/share/opencode/auth.json:/home/thor/.local/share/opencode/auth.json
     depends_on:
       remote-cli:
         condition: service_healthy
