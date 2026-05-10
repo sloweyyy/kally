@@ -84,7 +84,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/thor-sandbox
+          images: ghcr.io/${{ github.repository_owner }}/kally-sandbox
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
@@ -106,8 +106,8 @@ jobs:
         id: snapshot
         run: |
           set -euo pipefail
-          snapshot_name="thor-snapshot"
-          image_name="ghcr.io/${{ github.repository_owner }}/thor-sandbox:sha-${GITHUB_SHA}"
+          snapshot_name="kally-snapshot"
+          image_name="ghcr.io/${{ github.repository_owner }}/kally-sandbox:sha-${GITHUB_SHA}"
           api="https://app.daytona.io/api/snapshots"
           auth=(-H "Authorization: Bearer $DAYTONA_API_KEY")
 
