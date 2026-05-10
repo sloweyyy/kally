@@ -76,7 +76,7 @@ EXPOSE 3005
 CMD ["node", "/app/packages/salesforce-mcp/dist/index.js"]
 
 FROM build AS google-mcp
-# Install Python 3 + Google API client for sheets_ops.py / drive_ops.py
+# Install Python 3 + Google API client for drive_ops.py
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
@@ -84,7 +84,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     && /opt/google-venv/bin/pip install --no-cache-dir -r /app/packages/google-mcp/requirements.txt \
     && chown -R thor:thor /opt/google-venv
 ENV PYTHON_BIN=/opt/google-venv/bin/python3
-ENV SHEETS_OPS_PATH=/app/packages/google-mcp/sheets_ops.py
 ENV DRIVE_OPS_PATH=/app/packages/google-mcp/drive_ops.py
 USER thor
 ENV PORT=3008

@@ -222,7 +222,9 @@ export interface HealthCheckDeps {
 }
 
 export async function deepHealthCheck(deps: HealthCheckDeps): Promise<HealthCheckResult> {
-  const remoteCliUrl = `http://${deps.remoteCliHost}:${deps.remoteCliPort}`;
+  const remoteCliUrl = deps.remoteCliHost.includes("://")
+    ? deps.remoteCliHost.replace(/\/$/, "")
+    : `http://${deps.remoteCliHost}:${deps.remoteCliPort}`;
 
   const [runner, slackMcp, remoteCli, codex] = await Promise.all([
     checkService(deps.runnerUrl, deps.fetchImpl),
