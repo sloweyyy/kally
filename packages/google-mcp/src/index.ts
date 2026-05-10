@@ -1,6 +1,5 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -9,172 +8,35 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createLogger, logInfo, logError } from "@kally/common";
-import { runSheetsOps, runDriveOps, formatResult } from "./google-ops.js";
+import { runDriveOps, formatResult } from "./google-ops.js";
 
 const log = createLogger("google-mcp");
 const PORT = parseInt(process.env.PORT || "3008", 10);
-
-// ── OT evidence config ──────────────────────────────────────────────
-// Loaded from /workspace/ot-evidence.json (mounted via docker volume).
-
-interface Employee {
-  no: number;
-  employee_id: string;
-  full_name_vn: string;
-  email: string;
-}
-
-interface OtConfig {
-  spreadsheet_id: string;
-  drive_parent_folder_id: string;
-  current_tab: string;
-  employees: Employee[];
-}
-
-const OT_CONFIG_PATH = process.env.OT_CONFIG_PATH || "/workspace/ot-evidence.json";
-let otConfig: OtConfig | undefined;
-
-function getOtConfig(): OtConfig {
-  if (!otConfig) {
-    try {
-      otConfig = JSON.parse(readFileSync(OT_CONFIG_PATH, "utf-8")) as OtConfig;
-      logInfo(log, "ot_config_loaded", {
-        spreadsheetId: otConfig.spreadsheet_id,
-        employees: otConfig.employees.length,
-      });
-    } catch (err) {
-      logError(log, "ot_config_missing", `Cannot load ${OT_CONFIG_PATH}: ${err}`);
-      throw new Error(
-        `OT config not found at ${OT_CONFIG_PATH}. Mount ot-evidence.json in the workspace volume.`,
-      );
-    }
-  }
-  return otConfig;
-}
-
-/** Resolve a Slack user's email to their Vietnamese name from the OT config. */
-function resolveEmployee(email: string): Employee | undefined {
-  const cfg = getOtConfig();
-  return cfg.employees.find((e) => e.email.toLowerCase() === email.toLowerCase());
-}
 
 // ── Tool definitions ────────────────────────────────────────────────
 
 const tools: Tool[] = [
   {
-    name: "ot_read_sheet",
-    description:
-      "Read the OT evidence sheet and return a structured summary of all date groups and employees. Shows who has filled in evidence and who hasn't.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        tab_name: {
-          type: "string",
-          description:
-            "Sheet tab name (default: uses current_tab from config, usually 'Work Plan')",
-        },
-      },
-    },
-  },
-  {
-    name: "ot_find_employee_row",
-    description:
-      "Find an employee's row in the OT sheet for a specific date. Can look up by email or Vietnamese name. Returns the row number, current data, and A1 ranges for updating.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        email: {
-          type: "string",
-          description:
-            "Employee email (e.g. 'alice@example.com'). Used to resolve Vietnamese name from config.",
-        },
-        employee_name: {
-          type: "string",
-          description:
-            "Vietnamese full name as shown in the sheet (e.g. 'Trương Lê Vĩnh Phúc'). Use this OR email.",
-        },
-        ot_date: {
-          type: "string",
-          description:
-            "OT date to find (e.g. '16/Apr/2026'). Flexible parsing — d/Mon/yyyy, dd/mm/yyyy, yyyy-mm-dd all work.",
-        },
-        tab_name: {
-          type: "string",
-          description: "Sheet tab name (default: from config)",
-        },
-      },
-      required: ["ot_date"],
-    },
-  },
-  {
-    name: "ot_update_evidence",
-    description:
-      "Update an employee's OT evidence: their Ticket/Task description (column E) and optionally the Ref/Drive link (column F). Finds the row automatically by email + date. IMPORTANT: column F (Ref) may be pre-populated by HR with a Drive folder link — always read first and only overwrite if empty or you're adding a new link.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        email: {
-          type: "string",
-          description: "Employee email to identify the row",
-        },
-        employee_name: {
-          type: "string",
-          description: "Or: Vietnamese name directly",
-        },
-        ot_date: {
-          type: "string",
-          description: "OT date (e.g. '16/Apr/2026')",
-        },
-        ticket_task: {
-          type: "string",
-          description: "Content for column E — work description, ticket numbers, meetings, etc.",
-        },
-        ref: {
-          type: "string",
-          description:
-            "Content for column F — Drive folder link for evidence screenshots. Only set if column F is currently empty.",
-        },
-        tab_name: {
-          type: "string",
-          description: "Sheet tab name (default: from config)",
-        },
-      },
-      required: ["ot_date", "ticket_task"],
-    },
-  },
-  {
-    name: "ot_list_employees",
-    description:
-      "List all employees configured for OT evidence tracking. Returns employee IDs, Vietnamese names, and emails.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {},
-    },
-  },
-  {
     name: "drive_create_folder",
-    description:
-      "Create a folder in Google Drive under the OT evidence parent folder. Use for organizing per-employee per-date evidence screenshots.",
+    description: "Create a folder in Google Drive under a specified parent folder.",
     inputSchema: {
       type: "object" as const,
       properties: {
         folder_name: {
           type: "string",
-          description: "Folder name (e.g. 'Slowey - Evidence 16 Apr 2026')",
+          description: "Folder name",
         },
         parent_folder_id: {
           type: "string",
-          description:
-            "Parent folder ID. Defaults to the OT evidence drive_parent_folder_id from config.",
+          description: "Parent folder ID",
         },
       },
-      required: ["folder_name"],
+      required: ["folder_name", "parent_folder_id"],
     },
   },
   {
     name: "drive_upload_file",
-    description:
-      "Upload a local file to a Google Drive folder. Use for evidence files already saved to disk.",
+    description: "Upload a local file to a Google Drive folder.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -197,7 +59,7 @@ const tools: Tool[] = [
   {
     name: "drive_upload_base64",
     description:
-      "Upload a file from base64-encoded content to Google Drive. Use for screenshots fetched from Slack via get_slack_file (which returns images as base64).",
+      "Upload a file from base64-encoded content to Google Drive. Use for files fetched as base64 (e.g. screenshots from Slack via get_slack_file).",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -223,8 +85,7 @@ const tools: Tool[] = [
   },
   {
     name: "drive_list_files",
-    description:
-      "List files in a Google Drive folder. Use to check what evidence has already been uploaded.",
+    description: "List files in a Google Drive folder.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -240,130 +101,14 @@ const tools: Tool[] = [
 
 // ── Tool handler ────────────────────────────────────────────────────
 
-const DEFAULT_TIMEOUT = 60_000;
-
 async function handleToolCall(name: string, args: Record<string, unknown>) {
-  const cfg = getOtConfig();
-
   switch (name) {
-    // ── Sheets tools ──────────────────────────────────────────────
-
-    case "ot_read_sheet": {
-      const tab = String(args.tab_name || cfg.current_tab);
-      return formatResult(
-        await runSheetsOps([
-          "--read-ot-summary",
-          "--spreadsheet-id",
-          cfg.spreadsheet_id,
-          "--sheet-name",
-          tab,
-        ]),
-      );
-    }
-
-    case "ot_find_employee_row": {
-      const tab = String(args.tab_name || cfg.current_tab);
-      const empName = resolveEmployeeName(args, cfg);
-      return formatResult(
-        await runSheetsOps([
-          "--find-employee",
-          "--spreadsheet-id",
-          cfg.spreadsheet_id,
-          "--sheet-name",
-          tab,
-          "--employee-name",
-          empName,
-          "--target-date",
-          String(args.ot_date),
-        ]),
-      );
-    }
-
-    case "ot_update_evidence": {
-      const tab = String(args.tab_name || cfg.current_tab);
-      const empName = resolveEmployeeName(args, cfg);
-
-      // Step 1: Find the row
-      const findResult = await runSheetsOps([
-        "--find-employee",
-        "--spreadsheet-id",
-        cfg.spreadsheet_id,
-        "--sheet-name",
-        tab,
-        "--employee-name",
-        empName,
-        "--target-date",
-        String(args.ot_date),
-      ]);
-
-      if (!findResult.ok) return formatResult(findResult);
-
-      const found = JSON.parse(findResult.stdout);
-      if (!found.found) {
-        return {
-          content: [{ type: "text" as const, text: findResult.stdout }],
-          isError: true,
-        };
-      }
-
-      // Step 2: Update the cells
-      const ticketTask = String(args.ticket_task);
-      const ref = args.ref ? String(args.ref) : undefined;
-
-      if (ref) {
-        // Update both E and F
-        return formatResult(
-          await runSheetsOps([
-            "--update-range",
-            "--spreadsheet-id",
-            cfg.spreadsheet_id,
-            "--range",
-            found.range_ef,
-            "--row",
-            JSON.stringify([ticketTask, ref]),
-          ]),
-        );
-      } else {
-        // Update only E (Ticket/Task)
-        return formatResult(
-          await runSheetsOps([
-            "--update-range",
-            "--spreadsheet-id",
-            cfg.spreadsheet_id,
-            "--range",
-            found.range_e,
-            "--row",
-            JSON.stringify([ticketTask]),
-          ]),
-        );
-      }
-    }
-
-    case "ot_list_employees": {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              employees: cfg.employees,
-              spreadsheet_id: cfg.spreadsheet_id,
-              current_tab: cfg.current_tab,
-            }),
-          },
-        ],
-      };
-    }
-
-    // ── Drive tools ──────────────────────────────────────────────
-
     case "drive_create_folder": {
-      const parentId = String(args.parent_folder_id || cfg.drive_parent_folder_id);
       return formatResult(
         await runDriveOps([
           "--create-folder",
           "--parent-id",
-          parentId,
+          String(args.parent_folder_id),
           "--name",
           String(args.folder_name),
         ]),
@@ -383,7 +128,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>) {
     }
 
     case "drive_upload_base64": {
-      // Pass base64 data via stdin to avoid argument-length limits
       const b64 = String(args.base64_data);
       return formatResult(
         await runDriveOps(
@@ -397,7 +141,7 @@ async function handleToolCall(name: string, args: Record<string, unknown>) {
             String(args.mime_type),
             "--base64-stdin",
           ],
-          120_000, // allow more time for large uploads
+          120_000,
           b64,
         ),
       );
@@ -415,21 +159,6 @@ async function handleToolCall(name: string, args: Record<string, unknown>) {
         isError: true,
       };
   }
-}
-
-/** Resolve employee Vietnamese name from either email or direct name arg. */
-function resolveEmployeeName(args: Record<string, unknown>, cfg: OtConfig): string {
-  if (args.employee_name) return String(args.employee_name);
-  if (args.email) {
-    const emp = cfg.employees.find(
-      (e) => e.email.toLowerCase() === String(args.email).toLowerCase(),
-    );
-    if (emp) return emp.full_name_vn;
-    throw new Error(
-      `No employee found for email '${args.email}'. Known emails: ${cfg.employees.map((e) => e.email).join(", ")}`,
-    );
-  }
-  throw new Error("Either 'email' or 'employee_name' is required");
 }
 
 // ── MCP server factory ──────────────────────────────────────────────
@@ -468,7 +197,7 @@ function createGoogleMcpServer(): Server {
 // ── Express app + StreamableHTTP MCP transport ──────────────────────
 
 const app = express();
-app.use(express.json({ limit: "50mb" })); // large payloads for base64 images
+app.use(express.json({ limit: "50mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "google-mcp", tools: tools.length });
@@ -544,6 +273,5 @@ app.listen(PORT, () => {
   logInfo(log, "google_mcp_listening", {
     port: PORT,
     tools: tools.map((t) => t.name),
-    otConfigPath: OT_CONFIG_PATH,
   });
 });
