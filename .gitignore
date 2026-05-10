@@ -27,3 +27,4 @@ test.sh
 # Python
 __pycache__/
 *.pyc
+/.claude/
