@@ -70,13 +70,13 @@ jobs:
         if: ${{ inputs.skip_build != true }}
         run: |
           set -euo pipefail
-          gcloud builds submit --config=cloudbuild.yaml --substitutions=_PROJECT_ID=${{ env.GCP_PROJECT }} .
+          gcloud builds submit --config=cloudbuild.yaml .
 
       - name: Build opencode sidecar image
         if: ${{ inputs.skip_build != true }}
         run: |
           set -euo pipefail
-          gcloud builds submit --config=cloudbuild-opencode.yaml --substitutions=_PROJECT_ID=${{ env.GCP_PROJECT }} .
+          gcloud builds submit --config=cloudbuild-opencode.yaml .
 
       # ── Deploy phase ───────────────────────────────────────────────
       # Single-container services updated via `services update --image=...`.
