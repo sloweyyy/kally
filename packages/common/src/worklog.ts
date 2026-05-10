@@ -11,11 +11,9 @@
  * Set WORKLOG_ENABLED=false to disable (default: enabled).
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-
-const WORKLOG_DIR = process.env.WORKLOG_DIR || "/workspace/worklog";
-const WORKLOG_ENABLED = process.env.WORKLOG_ENABLED !== "false";
+import { envOptionalString, envString } from "./env.js";
 
 /** Max bytes for JSON-serialized args/result payloads. */
 const MAX_PAYLOAD_BYTES = 4096;
@@ -39,13 +37,21 @@ function ensureDir(dir: string): void {
   mkdirSync(dir, { recursive: true });
 }
 
+export function getWorklogDir(): string {
+  return envString(process.env, "WORKLOG_DIR", "/workspace/worklog");
+}
+
+function isWorklogEnabled(): boolean {
+  return envOptionalString(process.env, "WORKLOG_ENABLED") !== "false";
+}
+
 /** Write a JSON file into the day-partitioned worklog/day/json/ directory. */
 function writeEntry(filename: string, payload: Record<string, unknown>): void {
-  if (!WORKLOG_ENABLED) return;
+  if (!isWorklogEnabled()) return;
 
   try {
     const now = new Date();
-    const jsonDir = join(WORKLOG_DIR, now.toISOString().slice(0, 10), "json");
+    const jsonDir = join(getWorklogDir(), now.toISOString().slice(0, 10), "json");
     ensureDir(jsonDir);
     writeFileSync(join(jsonDir, filename), JSON.stringify(payload, null, 2) + "\n");
   } catch (err) {
@@ -92,4 +98,41 @@ export function writeToolCallLog(entry: ToolCallLogEntry): void {
     durationMs: entry.durationMs,
     error: entry.error,
   });
+}
+
+export interface InboundWebhookHistoryEntry {
+  timestamp: string;
+  route: string;
+  provider: string;
+  signatureVerified: boolean;
+  parseStatus: string;
+  requestId?: string;
+  eventType?: string;
+  action?: string;
+  reason?: string;
+  headers: Record<string, string | string[] | undefined>;
+  payload?: unknown;
+  rawBodyUtf8?: string;
+  rawBodyBase64?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Append a JSONL line to a day-partitioned stream.
+ * Never throws — logs to stderr on failure so it doesn't break the caller.
+ */
+export function appendJsonlWorklog(stream: string, entry: object): void {
+  if (!isWorklogEnabled()) return;
+
+  try {
+    const now = new Date();
+    const streamName = sanitize(stream).replace(/-+/g, "-");
+    const jsonlDir = join(getWorklogDir(), now.toISOString().slice(0, 10), "jsonl");
+    ensureDir(jsonlDir);
+    appendFileSync(join(jsonlDir, `${streamName}.jsonl`), `${JSON.stringify(entry)}\n`);
+  } catch (err) {
+    console.error(
+      `[worklog] Failed to append stream ${stream}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }

@@ -1,92 +1,137 @@
 export {
   WorkspaceConfigSchema,
   loadWorkspaceConfig,
+  validateWorkspaceConfig,
   getAllowedChannelIds,
   getChannelRepoMap,
   resolveRepoDirectory,
   isAllowedDirectory,
   createConfigLoader,
   WORKSPACE_CONFIG_PATH,
-  getProxyConfig,
   extractRepoFromCwd,
   getRepoUpstreams,
+  getInstallationIdForOwner,
   interpolateEnv,
   interpolateHeaders,
-  checkUserAccess,
 } from "./workspace-config.js";
+export { PROXY_NAMES, PROXY_REGISTRY, isProxyName, getProxyConfig } from "./proxies.js";
+export {
+  APPROVAL_TOOL_NAMES,
+  ApprovalArgsSchema,
+  ApprovalRequiredEventPayloadSchema,
+  CreateJiraIssueApprovalArgsSchema,
+  AddCommentToJiraIssueApprovalArgsSchema,
+  CreateFeatureFlagApprovalArgsSchema,
+  UpdateFeatureFlagApprovalArgsSchema,
+} from "./approval-events.js";
+export type {
+  ApprovalArgs,
+  ApprovalRequiredEventPayload,
+  ApprovalToolName,
+} from "./approval-events.js";
+export {
+  envOptionalString,
+  envString,
+  envInt,
+  envCsv,
+  getRunnerBaseUrl,
+  matchesInternalSecret,
+} from "./env.js";
+export type { EnvSource } from "./env.js";
+export {
+  loadGatewayEnv,
+  loadRunnerEnv,
+  loadRemoteCliEnv,
+  loadRemoteCliAppEnv,
+  loadRemoteCliGitHubEnv,
+  loadRemoteCliInternalEnv,
+  loadAdminEnv,
+  loadMetabaseEnv,
+  loadGitHubAppAuthEnv,
+  loadDaytonaEnv,
+} from "./service-env.js";
 export type {
   WorkspaceConfig,
   RepoConfig,
   ProxyConfig,
   ProxyUpstream,
   ConfigLoader,
-  GitHubAppInstallation,
-  GitHubAppConfig,
-  AccessPolicy,
-  AccessUser,
-  AccessDecision,
+  OwnerConfig,
+  ValidationIssue,
+  ValidationResult,
 } from "./workspace-config.js";
-export { createVaultClient, invalidateProxyUserConnections } from "./vault-client.js";
+export type { ProxyName } from "./proxies.js";
+export { writeToolCallLog, appendJsonlWorklog, getWorklogDir } from "./worklog.js";
+export type { ToolCallLogEntry, InboundWebhookHistoryEntry } from "./worklog.js";
+export {
+  SessionEventLogRecordSchema,
+  AliasRecordSchema,
+  appendSessionEvent,
+  appendAlias,
+  readTriggerSlice,
+  findActiveTrigger,
+  resolveAlias,
+  reverseLookupAnchor,
+  currentSessionForAnchor,
+  listSessionAliases,
+  mintAnchor,
+  mintTriggerId,
+  sessionLogPath,
+  isUuidV7,
+  UUID_V7_RE,
+  MAX_SESSION_FILE_BYTES,
+} from "./event-log.js";
 export type {
-  VaultClient,
-  VaultClientConfig,
-  VaultProvider,
-  VaultGetResponse,
-  VaultGetResult,
-  VaultErr,
-} from "./vault-client.js";
-export { writeToolCallLog } from "./worklog.js";
-export type { ToolCallLogEntry } from "./worklog.js";
+  SessionEventLogRecord,
+  AliasRecord,
+  TriggerSlice,
+  ActiveTriggerResult,
+  ReverseAnchorEntry,
+} from "./event-log.js";
 export { createLogger, logInfo, logWarn, logError, truncate } from "./logger.js";
 export type { Logger } from "./logger.js";
+export { errorToMetadata } from "./errors.js";
+export type { ErrorMetadataOptions } from "./errors.js";
 export {
-  readNotes,
-  createNotes,
-  continueNotes,
-  appendTrigger,
-  appendSummary,
-  findNotesFile,
-  getSessionIdFromNotes,
-  registerAlias,
+  WORKSPACE_REPOS_ROOT,
+  WORKSPACE_WORKTREES_ROOT,
+  THOR_WORKTREES_ROOT_ENV,
+  getWorkspaceWorktreesRoot,
+  isPathWithin,
+  realpathOrNull,
+  resolveExistingDirectoryWithinRoot,
+} from "./paths.js";
+export {
   resolveCorrelationKeys,
-  isAliasableTool,
-  isAliasableGitCommand,
-  isAliasableMcpTool,
-  extractAliases,
-  getNotesLineCount,
-  hasSlackReply,
-  KallyMetaSchema,
-  KallyMetaAliasSchema,
-  KallyMetaApprovalSchema,
-  extractKallyMeta,
-  formatKallyMeta,
-  computeGitAlias,
-  computeSlackAlias,
-  inferRepoFromPath,
-  extractBranchFromGitArgs,
-} from "./notes.js";
-export type {
-  ToolArtifact,
-  ExtractedAlias,
-  KallyMeta,
-  KallyMetaAlias,
-  KallyMetaApproval,
-} from "./notes.js";
-export { ExecResultSchema, NdjsonChunkSchema } from "./exec-result.js";
-export type { ExecResult, NdjsonChunk } from "./exec-result.js";
-export { KallyTracer, TraceMetadataSchema, redactValue } from "./tracing.js";
-export type {
-  TraceMetadata,
-  TraceHandle,
-  StartTraceInput,
-  RecordToolInput,
-  RecordStepInput,
-  EndTraceInput,
-  KallyTracerOptions,
-} from "./tracing.js";
+  resolveCorrelationLockKey,
+  hasSessionForCorrelationKey,
+  ensureAnchorForCorrelationKey,
+  appendCorrelationAlias,
+  appendCorrelationAliasForAnchor,
+  computeGitCorrelationKey,
+  computeSlackCorrelationKey,
+  resolveAnchorForCorrelationKey,
+  resolveSessionForCorrelationKey,
+  ANCHOR_LOCK_PREFIX,
+  SESSION_LOCK_PREFIX,
+} from "./correlation.js";
+export type { EnsureAnchorResult } from "./correlation.js";
+export { withKeyLock } from "./key-lock.js";
+export { ExecResultSchema, ExecStreamEventSchema } from "./exec-result.js";
+export type { ExecResult, ExecStreamEvent } from "./exec-result.js";
+export { deriveGitHubAppBotIdentity } from "./github-identity.js";
+export type { GitHubAppBotIdentity, GitHubAppBotIdentityInput } from "./github-identity.js";
+export {
+  buildThorDisclaimerForSession,
+  buildThorTriggerUrl,
+  formatThorDisclaimerFooter,
+} from "./disclaimer.js";
+export type { ThorDisclaimerContext } from "./disclaimer.js";
 export {
   ProgressStartSchema,
   ProgressToolSchema,
+  ProgressMemorySchema,
+  ProgressDelegateSchema,
   ProgressDoneSchema,
   ProgressErrorSchema,
   ProgressApprovalRequiredSchema,
@@ -98,6 +143,8 @@ export {
 export type {
   ProgressStart,
   ProgressTool,
+  ProgressMemory,
+  ProgressDelegate,
   ProgressDone,
   ProgressError,
   ProgressApprovalRequired,

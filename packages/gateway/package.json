@@ -11,14 +11,16 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@slack/types": "2.20.1",
+    "@slack/web-api": "^7.15.1",
     "@kally/common": "workspace:*",
     "express": "^5.1.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.2",
-    "@types/node": "^22.13.10",
-    "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "@types/node": "^24.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.0"
   }
 }

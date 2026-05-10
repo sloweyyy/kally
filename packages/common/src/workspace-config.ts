@@ -1,7 +1,9 @@
 import { z } from "zod/v4";
+import { WORKSPACE_REPOS_ROOT, isPathWithin } from "./paths.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve, normalize } from "node:path";
 import { createLogger, logWarn } from "./logger.js";
+import { PROXY_NAMES } from "./proxies.js";
 
 // --- Schema ---
 
@@ -10,87 +12,86 @@ const RepoConfigSchema = z.object({
   proxies: z.array(z.string()).optional(),
 });
 
-const ProxyUpstreamSchema = z.object({
-  url: z.string(),
-  headers: z.record(z.string(), z.string()).optional(),
+const OwnerConfigSchema = z.object({
+  github_app_installation_id: z.number().int().positive(),
 });
 
-/**
- * Access policy for a proxy upstream. Controls who may invoke tools.
- *   - "public":  no identity check (default when unset) — backwards compatible
- *   - "katalon": caller's email must end with one of the configured suffixes
- *   - "support": caller's email must be in `support_team_emails`
- *
- * The gate runs BEFORE the allow/approve classification and BEFORE any
- * upstream call. A denied request returns 403 and never touches the upstream.
- */
-const AccessPolicySchema = z.enum(["public", "katalon", "support"]);
-export type AccessPolicy = z.infer<typeof AccessPolicySchema>;
+const MitmproxyRuleSchema = z
+  .object({
+    host: z.string().min(1).optional(),
+    host_suffix: z.string().min(2).startsWith(".").optional(),
+    path_prefix: z.string().min(1).startsWith("/").optional(),
+    headers: z
+      .record(z.string(), z.string())
+      .refine(
+        (headers) => Object.keys(headers).length > 0,
+        '"headers" must contain at least one entry',
+      ),
+    readonly: z.boolean().optional().default(false),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasHost = typeof value.host === "string";
+    const hasHostSuffix = typeof value.host_suffix === "string";
+    if (hasHost === hasHostSuffix) {
+      ctx.addIssue({
+        code: "custom",
+        message: 'Exactly one of "host" or "host_suffix" is required',
+        path: ["host"],
+      });
+    }
+  });
 
-const ProxyConfigSchema = z.object({
-  upstream: ProxyUpstreamSchema,
-  allow: z.array(z.string()).default([]),
-  approve: z.array(z.string()).default([]),
-  /** Who can invoke this upstream. Defaults to "public" (no check). */
-  access: AccessPolicySchema.optional(),
-  /** Whether to inject per-user credentials from the vault into the upstream
-   *  call. Requires `access` to be "support" or "katalon". When true and a
-   *  user has no enrolled creds, the request is rejected with 412. When
-   *  false or unset, the upstream uses its container-wide credentials. */
-  per_user_creds: z.boolean().optional(),
-  /**
-   * How per-user credentials reach the upstream.
-   *   - "args": the proxy adds a reserved `_kally_auth` field to the tool
-   *     call arguments. The upstream MCP server (Kally-owned, e.g.
-   *     salesforce-mcp) reads it, strips it, and uses the creds for the
-   *     duration of that request.
-   *   - "connection": the proxy opens a separate MCP connection per user,
-   *     baking the user's credential into the transport headers. Used for
-   *     third-party MCP servers (e.g. Atlassian) that expect auth at the
-   *     transport layer. Connections are cached per user and evicted on
-   *     idle TTL.
-   * Defaults to "args" for backwards compatibility.
-   */
-  creds_injection: z.enum(["args", "connection"]).optional(),
-});
+const MitmproxyPassthroughHostSchema = z.string().refine((value) => {
+  if (value.startsWith(".")) {
+    return value.length > 1;
+  }
+  return !value.includes("/") && !value.includes(":") && value.length > 0;
+}, "Passthrough entries must be an exact host or a suffix starting with '.'");
 
-const GitHubAppInstallationSchema = z.object({
-  org: z.string(),
-  installation_id: z.number().int().positive(),
-  app_id: z.string().optional().default(""),
-  private_key_path: z.string().optional().default(""),
-  api_url: z.string().optional().default(""),
-});
-
-const GitHubAppConfigSchema = z.object({
-  installations: z.array(GitHubAppInstallationSchema),
-});
-
-export const WorkspaceConfigSchema = z.object({
-  repos: z.record(z.string(), RepoConfigSchema),
-  proxies: z.record(z.string(), ProxyConfigSchema).optional(),
-  github_app: GitHubAppConfigSchema.optional(),
-  /** List of Katalon emails that count as Support team members. Used by
-   *  proxies with `access: "support"`. */
-  support_team_emails: z.array(z.string()).default([]),
-  /** Email domain suffixes that count as "katalon" access (e.g. "@katalon.com").
-   *  Used by proxies with `access: "katalon"`. */
-  katalon_email_suffixes: z.array(z.string()).default(["@katalon.com"]),
-});
+export const WorkspaceConfigSchema = z
+  .object({
+    repos: z.record(z.string(), RepoConfigSchema),
+    owners: z.record(z.string(), OwnerConfigSchema).optional(),
+    mitmproxy: z.array(MitmproxyRuleSchema).optional(),
+    mitmproxy_passthrough: z.array(MitmproxyPassthroughHostSchema).optional(),
+    /** Emails that count as Support team members (used by `access: "support"` proxies). */
+    support_team_emails: z.array(z.string()).optional(),
+    /** Email suffixes that count as Katalon (used by `access: "katalon"` proxies). */
+    katalon_email_suffixes: z.array(z.string()).optional(),
+  })
+  .strict();
 
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
-export type GitHubAppInstallation = z.infer<typeof GitHubAppInstallationSchema>;
-export type GitHubAppConfig = z.infer<typeof GitHubAppConfigSchema>;
-export type ProxyConfig = z.infer<typeof ProxyConfigSchema>;
-export type ProxyUpstream = z.infer<typeof ProxyUpstreamSchema>;
+export type OwnerConfig = z.infer<typeof OwnerConfigSchema>;
 
-// ── Access check ────────────────────────────────────────────────────────────
+export interface ProxyUpstream {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** Per-proxy access policy.
+ *   - "public":  no identity check (default when unset)
+ *   - "katalon": user_email must end with one of katalon_email_suffixes
+ *   - "support": user_email must be in support_team_emails
+ */
+export type AccessPolicy = "public" | "katalon" | "support";
+
+export interface ProxyConfig {
+  upstream: ProxyUpstream;
+  allow: string[];
+  approve: string[];
+  /** Who can invoke this upstream. Defaults to "public" (no check). */
+  access?: AccessPolicy;
+  /** Whether to inject per-user credentials from the vault. */
+  per_user_creds?: boolean;
+  /** How per-user creds reach the upstream: as args field or per-user connection. */
+  creds_injection?: "args" | "connection";
+}
 
 export interface AccessUser {
-  /** Slack user id, e.g. "U0AB0BK0FMX". */
   user_id?: string;
-  /** Canonical email (lowercased recommended). */
   user_email?: string;
 }
 
@@ -101,10 +102,6 @@ export type AccessDecision =
 /**
  * Decide whether a user may call this upstream. Returns a typed reason on
  * deny so the proxy can format a user-friendly Slack message.
- *
- * "public" (or unset access): always allow — backwards compat path.
- * "katalon": user_email must end with one of katalon_email_suffixes.
- * "support": user_email must be in support_team_emails (case-insensitive).
  */
 export function checkUserAccess(
   config: WorkspaceConfig,
@@ -156,6 +153,83 @@ export function checkUserAccess(
   return { ok: true };
 }
 
+// --- Validator ---
+
+export interface ValidationIssue {
+  path: string;
+  message: string;
+}
+
+export type ValidationResult =
+  | { ok: true; data: WorkspaceConfig }
+  | { ok: false; issues: ValidationIssue[] };
+
+/**
+ * Validate an already-parsed config object. Aggregates all issues
+ * (schema, duplicate channels, unknown proxies) before returning.
+ */
+export function validateWorkspaceConfig(parsed: unknown): ValidationResult {
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    Object.prototype.hasOwnProperty.call(parsed, "proxies")
+  ) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: "proxies",
+          message:
+            'Top-level "proxies" has moved to code (packages/common/src/proxies.ts). Remove it from config.json.',
+        },
+      ],
+    };
+  }
+
+  const result = WorkspaceConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    return {
+      ok: false,
+      issues: result.error.issues.map((i) => ({
+        path: i.path.length > 0 ? i.path.join(".") : "(root)",
+        message: i.message,
+      })),
+    };
+  }
+
+  const issues: ValidationIssue[] = [];
+
+  const seen = new Map<string, string>(); // channel → repo
+  for (const [repo, config] of Object.entries(result.data.repos)) {
+    for (const channel of config.channels ?? []) {
+      const existing = seen.get(channel);
+      if (existing) {
+        issues.push({
+          path: `repos.${repo}.channels`,
+          message: `Duplicate channel ID "${channel}" — already mapped to repo "${existing}"`,
+        });
+      } else {
+        seen.set(channel, repo);
+      }
+    }
+  }
+
+  const proxyNames = new Set<string>(PROXY_NAMES);
+  for (const [repo, repoConfig] of Object.entries(result.data.repos)) {
+    for (const proxyRef of repoConfig.proxies ?? []) {
+      if (!proxyNames.has(proxyRef)) {
+        issues.push({
+          path: `repos.${repo}.proxies`,
+          message: `Unknown proxy "${proxyRef}". Available proxies: ${PROXY_NAMES.join(", ")}`,
+        });
+      }
+    }
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+  return { ok: true, data: result.data };
+}
+
 // --- Loader ---
 
 const REPOS_PREFIX = "/workspace/repos";
@@ -183,54 +257,11 @@ export function loadWorkspaceConfig(path: string): WorkspaceConfig {
     );
   }
 
-  const result = WorkspaceConfigSchema.safeParse(parsed);
-  if (!result.success) {
-    const issues = result.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`);
-    throw new Error(`Invalid workspace config at ${path}:\n${issues.join("\n")}`);
+  const result = validateWorkspaceConfig(parsed);
+  if (!result.ok) {
+    const lines = result.issues.map((i) => `  - ${i.path}: ${i.message}`);
+    throw new Error(`Invalid workspace config at ${path}:\n${lines.join("\n")}`);
   }
-
-  // Validate proxy names: alphanumeric + hyphens only, no reserved names
-  const RESERVED_PROXY_NAMES = new Set(["health", "upstreams", "tools", "approval", "approvals"]);
-  const PROXY_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
-  for (const name of Object.keys(result.data.proxies ?? {})) {
-    if (!PROXY_NAME_RE.test(name)) {
-      throw new Error(
-        `Invalid proxy name "${name}" in workspace config: must be lowercase alphanumeric with hyphens`,
-      );
-    }
-    if (RESERVED_PROXY_NAMES.has(name)) {
-      throw new Error(
-        `Reserved proxy name "${name}" in workspace config: collides with /${name} endpoint`,
-      );
-    }
-  }
-
-  // Detect duplicate channel IDs across repos
-  const seen = new Map<string, string>(); // channel → repo
-  for (const [repo, config] of Object.entries(result.data.repos)) {
-    for (const channel of config.channels ?? []) {
-      const existing = seen.get(channel);
-      if (existing) {
-        throw new Error(
-          `Duplicate channel ID "${channel}" in workspace config: mapped to both "${existing}" and "${repo}"`,
-        );
-      }
-      seen.set(channel, repo);
-    }
-  }
-
-  // Validate repo.proxies entries reference top-level proxy names
-  const proxyNames = new Set(Object.keys(result.data.proxies ?? {}));
-  for (const [repo, config] of Object.entries(result.data.repos)) {
-    for (const proxyRef of config.proxies ?? []) {
-      if (!proxyNames.has(proxyRef)) {
-        throw new Error(
-          `Repo "${repo}" references unknown proxy "${proxyRef}" in workspace config. Available proxies: ${[...proxyNames].join(", ") || "(none)"}`,
-        );
-      }
-    }
-  }
-
   return result.data;
 }
 
@@ -238,12 +269,7 @@ export const WORKSPACE_CONFIG_PATH = "/workspace/config.json";
 
 // --- Dynamic loader ---
 
-export interface ConfigLoader {
-  /** Returns the current workspace config, re-reading from disk if the TTL has expired. */
-  (): WorkspaceConfig;
-  /** Force an immediate reload on next access. */
-  invalidate(): void;
-}
+export type ConfigLoader = () => WorkspaceConfig;
 
 const configLog = createLogger("config-loader");
 
@@ -255,7 +281,7 @@ const configLog = createLogger("config-loader");
 export function createConfigLoader(path: string): ConfigLoader {
   let lastGood: WorkspaceConfig | null = null;
 
-  const loader = (() => {
+  return () => {
     try {
       lastGood = loadWorkspaceConfig(path);
       return lastGood;
@@ -272,11 +298,7 @@ export function createConfigLoader(path: string): ConfigLoader {
         `Failed to load workspace config from ${path} and no previous config available`,
       );
     }
-  }) as ConfigLoader;
-
-  loader.invalidate = () => {};
-
-  return loader;
+  };
 }
 
 // --- Helpers ---
@@ -305,13 +327,6 @@ export function getChannelRepoMap(config: WorkspaceConfig): Map<string, string> 
     }
   }
   return map;
-}
-
-/**
- * Get proxy config by name, or undefined if not configured.
- */
-export function getProxyConfig(config: WorkspaceConfig, name: string): ProxyConfig | undefined {
-  return config.proxies?.[name];
 }
 
 /**
@@ -380,7 +395,17 @@ export function getRepoUpstreams(config: WorkspaceConfig, repoName: string): str
   return repo.proxies ?? [];
 }
 
-const ALLOWED_PREFIXES = ["/workspace/repos/"];
+/**
+ * Lookup GitHub App installation ID for a configured owner.
+ */
+export function getInstallationIdForOwner(
+  config: WorkspaceConfig,
+  owner: string,
+): number | undefined {
+  return config.owners?.[owner]?.github_app_installation_id;
+}
+
+const ALLOWED_PREFIXES = [WORKSPACE_REPOS_ROOT];
 
 /**
  * Check that a directory path is under an allowed workspace prefix.
@@ -390,6 +415,6 @@ const ALLOWED_PREFIXES = ["/workspace/repos/"];
 export function isAllowedDirectory(directory: string): boolean {
   const normalized = normalize(resolve("/", directory));
   return ALLOWED_PREFIXES.some(
-    (prefix) => normalized.startsWith(prefix) && normalized.length > prefix.length,
+    (prefix) => isPathWithin(prefix, normalized) && normalized.length > prefix.length,
   );
 }
