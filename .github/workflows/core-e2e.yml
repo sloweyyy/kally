@@ -57,6 +57,15 @@ jobs:
       VOUCH_GOOGLE_CLIENT_SECRET: ci-fake
       VOUCH_JWT_SECRET: ci-fake
       VOUCH_WHITELIST: ci@localhost
+      # Point e2e at this fork so gh pr list / view resolve against the
+      # repository_owner that owners.<owner>.github_app_installation_id
+      # is configured for in docker-volumes/workspace/config.json.
+      REMOTE_CLI_GIT_REPO_URL: https://github.com/${{ github.repository }}
+      REMOTE_CLI_GITHUB_REPO: ${{ github.repository }}
+      # This fork has no ATLASSIAN_AUTH / real POSTHOG_API_KEY, so neither
+      # approval-capable MCP upstream connects in CI. Permit the approval
+      # flow assertion to skip rather than fail under those conditions.
+      E2E_ALLOW_SKIP_APPROVAL_FLOW: "1"
 
     steps:
       - name: Checkout
