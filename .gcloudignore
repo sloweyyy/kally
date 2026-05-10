@@ -1,0 +1,15 @@
+.git/
+.gitignore
+node_modules/
+**/node_modules/
+**/dist/
+docker-volumes/
+.env
+.env.*
+!.env.example
+.husky/
+.DS_Store
+.idea/
+.vscode/
+docs/
+*.log
