@@ -44,58 +44,17 @@
     },
     {
       "id": "US-004",
-      "title": "Confirm Sandbox E2E and Core E2E pass on the merge PR",
-      "description": "After the GitHub App ID default fix, KALLY_VAULT secrets generation, and Dockerfile @kally rename, the merge PR's CI gauntlet should be green.",
+      "title": "Drive PR #5 CI checks to all-green via fix-push-wait loop",
+      "description": "Each iteration: list latest CI runs on merge/upstream-thor; if any are still in_progress, end the iteration without changes (next iteration will check again); if any failed, fetch the failure logs, identify the root cause, fix the code, commit, push. Mark passes:true only when both Core E2E and Sandbox E2E latest runs on the head commit have conclusion: success. Unit Tests must also be success. Required behavior: NEVER mark passes:true based on a passing run from an older commit.",
       "acceptanceCriteria": [
-        "gh run list --branch merge/upstream-thor shows latest Core E2E conclusion: success",
-        "gh run list --branch merge/upstream-thor shows latest Sandbox E2E conclusion: success",
-        "PR #5 mergeable status: clean (no failed required checks)"
+        "gh run list --branch merge/upstream-thor: latest Core E2E run on HEAD commit is success",
+        "gh run list --branch merge/upstream-thor: latest Sandbox E2E run on HEAD commit is success",
+        "gh run list --branch merge/upstream-thor: latest Unit Tests run on HEAD commit is success",
+        "PR #5 mergeable_state is clean (no failed required checks)"
       ],
       "priority": 4,
       "passes": false,
-      "notes": "If failing, surface the actual error (don't loop blindly retrying)."
-    },
-    {
-      "id": "US-005",
-      "title": "Wire Salesforce MCP credentials via Secret Manager",
-      "description": "salesforce-mcp Cloud Run service has no SALESFORCE_* env vars set. First tool call will fail. Add the 5 SALESFORCE_* env vars as secrets and bind them to the service.",
-      "acceptanceCriteria": [
-        "User has provided SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, SALESFORCE_USERNAME, SALESFORCE_PASSWORD, SALESFORCE_INSTANCE_URL (or this story is paused with notes asking for them)",
-        "Each secret created in gcloud secrets",
-        "salesforce-mcp service updated with --update-secrets to bind all 5",
-        "Health endpoint reports salesforce: connected with non-zero tool count"
-      ],
-      "priority": 5,
-      "passes": false,
-      "notes": "Stop and ask the user for the 5 Salesforce values before creating empty secrets. Don't fabricate."
-    },
-    {
-      "id": "US-006",
-      "title": "Wire Google MCP service-account credentials",
-      "description": "google-mcp Cloud Run service has no GOOGLE_APPLICATION_CREDENTIALS configured. Drive operations will fail. Mount a service-account JSON via Secret Manager.",
-      "acceptanceCriteria": [
-        "User has provided a Google service-account JSON with Drive API access (or this story is paused asking for it)",
-        "Service-account JSON stored as secret GOOGLE_APPLICATION_CREDENTIALS_JSON",
-        "google-mcp service updated to mount the secret as a file at /var/secrets/google/sa.json and set GOOGLE_APPLICATION_CREDENTIALS env",
-        "Health endpoint reports google: connected with non-zero tool count"
-      ],
-      "priority": 6,
-      "passes": false,
-      "notes": "Stop and ask the user for the JSON before fabricating."
-    },
-    {
-      "id": "US-007",
-      "title": "Wire Atlassian basic-auth for the proxy",
-      "description": "Workspace config uses ${ATLASSIAN_BASIC_AUTH} for the Atlassian upstream. Currently unset, so atlassian: connected=false in remote-cli MCP fan-out.",
-      "acceptanceCriteria": [
-        "User has provided ATLASSIAN_BASIC_AUTH (base64 of email:api_token) or this story is paused asking for it",
-        "Secret ATLASSIAN_BASIC_AUTH created",
-        "Updated in any service that interpolates it (gateway via workspace config substitution)",
-        "Health endpoint shows atlassian: connected=true"
-      ],
-      "priority": 7,
-      "passes": false,
-      "notes": "Stop and ask the user before fabricating."
+      "notes": "USE: gh run view <id> --log-failed to read the actual failure. Common failure modes seen so far: missing required env var (compose :? enforcement) — fix in .github/workflows/core-e2e.yml; @thor/* package filter mismatch in Dockerfile — fix to @kally/*; private GHCR image — make package public (user already did kally-sandbox). If a failure is environmental (Daytona quota, GitHub rate limit) and not code: end iteration with notes; do not commit speculative fixes. After pushing a fix, manually trigger workflow if path filter would skip: gh workflow run 'Core E2E' --ref merge/upstream-thor and gh workflow run 'Sandbox E2E' --ref merge/upstream-thor. Iteration ends when one fix is pushed OR when waiting on in-progress runs."
     }
   ]
 }
