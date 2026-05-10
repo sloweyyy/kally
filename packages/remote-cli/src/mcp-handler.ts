@@ -1,5 +1,6 @@
 import {
   appendCorrelationAlias,
+  checkUserAccess,
   computeSlackCorrelationKey,
   createLogger,
   ExecResultSchema,
@@ -68,6 +69,11 @@ export interface McpCommandContext {
   directory?: string;
   sessionId?: string;
   callId?: string;
+  /** Slack user id forwarded by the gateway (x-kally-user-slack-id). */
+  userSlackId?: string;
+  /** Slack user email forwarded by the gateway (x-kally-user-email).
+   *  Used by checkUserAccess to enforce per-proxy `access` policies. */
+  userEmail?: string;
 }
 
 export interface McpServiceDeps {
@@ -480,6 +486,26 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     const instance = await getInstance(upstreamName);
     if (!instance) {
       return fail(`Unknown upstream "${upstreamName}".`);
+    }
+
+    // Enforce per-upstream access policy ("public" / "katalon" / "support")
+    // using the caller identity forwarded by the gateway. Restored from the
+    // pre-merge kally fork after the upstream merge dropped the wiring.
+    const proxy = getProxyConfig(upstreamName);
+    if (proxy) {
+      const decision = checkUserAccess(getConfig(), proxy, {
+        user_id: context.userSlackId,
+        user_email: context.userEmail,
+      });
+      if (!decision.ok) {
+        logWarn(log, "tool_call_access_denied", {
+          upstream: upstreamName,
+          tool: toolInfo.name,
+          reason: decision.reason,
+          ...getThorIds(context),
+        });
+        return fail(`access_denied: ${decision.reason} — ${decision.message}\n`);
+      }
     }
 
     if (toolInfo.classification === "approve") {
