@@ -440,9 +440,9 @@ export default function Dashboard() {
           <div className="grid grid-cols-4 gap-3.5 max-md:grid-cols-2">
             {[
               { label: "Traces", title: "LangSmith", sub: "project: kally", href: "https://smith.langchain.com" },
-              { label: "Docs", title: "Confluence", sub: "PRD + Architecture", href: "https://katalon.atlassian.net/wiki/spaces/CST/pages/0000000000/Kally" },
-              { label: "Product", title: "PRD v1", sub: "goals + rollout", href: "https://katalon.atlassian.net/wiki/spaces/CST/pages/0000000001" },
-              { label: "Onboarding", title: "User Guide", sub: "for teammates", href: "https://katalon.atlassian.net/wiki/spaces/CST/pages/0000000002" },
+              { label: "Docs", title: "Confluence", sub: "PRD + Architecture", href: "#docs" },
+              { label: "Product", title: "PRD v1", sub: "goals + rollout", href: "#prd" },
+              { label: "Onboarding", title: "User Guide", sub: "for teammates", href: "#onboarding" },
             ].map((link) => (
               <a key={link.label} href={link.href} target="_blank" rel="noopener noreferrer"
                 className="bg-[var(--s400)] border border-[var(--border)] rounded-[10px] p-5 no-underline text-[var(--cursor-dark)] hover:shadow-[rgba(0,0,0,0.02)_0_0_16px] transition-shadow">

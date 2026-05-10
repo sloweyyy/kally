@@ -12,7 +12,7 @@ You only run this setup once per GCP project. It takes ~5 minutes.
 
 ## One-time setup
 
-Run these from your laptop with `gcloud` already authenticated as a project-owner-equivalent identity. Substitute `OWNER/REPO` with `sloweyyy/slowey-lab` (or your fork).
+Run these from your laptop with `gcloud` already authenticated as a project-owner-equivalent identity. Substitute `OWNER/REPO` with `sloweyyy/kally` (or your fork).
 
 ### 1. Set variables
 
@@ -20,7 +20,7 @@ Run these from your laptop with `gcloud` already authenticated as a project-owne
 export PROJECT_ID=kally-lab-a8e32b
 export PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 export GH_OWNER=sloweyyy
-export GH_REPO=slowey-lab
+export GH_REPO=kally
 
 export POOL=gh-actions-pool
 export PROVIDER=gh-actions
