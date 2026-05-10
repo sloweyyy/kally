@@ -1,0 +1,19 @@
+timeout: 1800s
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "--target",
+        "opencode",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/opencode:latest",
+        ".",
+      ]
+
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/opencode:latest

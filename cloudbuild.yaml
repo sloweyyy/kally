@@ -1,0 +1,92 @@
+timeout: 3600s
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build-gateway
+    args:
+      [
+        "build",
+        "--target",
+        "gateway",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/gateway:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-runner
+    args:
+      [
+        "build",
+        "--target",
+        "runner",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/runner:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-slack
+    args:
+      [
+        "build",
+        "--target",
+        "slack-mcp",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/slack-mcp:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-vault
+    args:
+      [
+        "build",
+        "--target",
+        "vault",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/vault:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-salesforce
+    args:
+      [
+        "build",
+        "--target",
+        "salesforce-mcp",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/salesforce-mcp:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-google
+    args:
+      [
+        "build",
+        "--target",
+        "google-mcp",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/google-mcp:latest",
+        ".",
+      ]
+  - name: gcr.io/cloud-builders/docker
+    id: build-remote-cli
+    args:
+      [
+        "build",
+        "--target",
+        "remote-cli",
+        "-t",
+        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/remote-cli:latest",
+        ".",
+      ]
+
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/gateway:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/runner:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/slack-mcp:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/vault:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/salesforce-mcp:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/google-mcp:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/kally/remote-cli:latest

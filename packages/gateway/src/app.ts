@@ -155,7 +155,9 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
     fetchImpl: config.fetchImpl,
   };
   const remoteCliHost = config.remoteCliHost ?? "remote-cli";
-  const remoteCliUrl = `http://${remoteCliHost}:${config.remoteCliPort ?? 3004}`;
+  const remoteCliUrl = remoteCliHost.includes("://")
+    ? remoteCliHost.replace(/\/$/, "")
+    : `http://${remoteCliHost}:${config.remoteCliPort ?? 3004}`;
   const userResolver: SlackUserResolver = config.userResolver ?? nullSlackUserResolver;
   const slackWeb = config.slackWebClient;
   const vault = config.vaultClient;

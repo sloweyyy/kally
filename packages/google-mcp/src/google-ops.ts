@@ -5,8 +5,6 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PYTHON_BIN = process.env.PYTHON_BIN ?? "python3";
-const SHEETS_OPS_PATH =
-  process.env.SHEETS_OPS_PATH ?? path.resolve(__dirname, "..", "sheets_ops.py");
 const DRIVE_OPS_PATH = process.env.DRIVE_OPS_PATH ?? path.resolve(__dirname, "..", "drive_ops.py");
 
 export interface OpsResult {
@@ -51,10 +49,6 @@ function runScript(
       resolve({ ok: false, stdout, stderr: stderr + String(err), exitCode: null });
     });
   });
-}
-
-export function runSheetsOps(args: string[], timeoutMs = 60_000): Promise<OpsResult> {
-  return runScript(SHEETS_OPS_PATH, args, timeoutMs);
 }
 
 export function runDriveOps(
