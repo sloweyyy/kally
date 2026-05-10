@@ -37,23 +37,23 @@ COPY packages/common/ packages/common/
 
 FROM common-source AS gateway-build
 COPY packages/gateway/ packages/gateway/
-RUN pnpm --filter @thor/gateway build
+RUN pnpm --filter @kally/gateway build
 
 FROM common-source AS admin-build
 COPY packages/admin/ packages/admin/
-RUN pnpm --filter @thor/admin build
+RUN pnpm --filter @kally/admin build
 
 FROM common-source AS runner-build
 COPY packages/runner/ packages/runner/
-RUN pnpm --filter @thor/runner build
+RUN pnpm --filter @kally/runner build
 
 FROM common-source AS remote-cli-build
 COPY packages/remote-cli/ packages/remote-cli/
-RUN pnpm --filter @thor/remote-cli build
+RUN pnpm --filter @kally/remote-cli build
 
 FROM common-source AS opencode-cli-build
 COPY packages/opencode-cli/ packages/opencode-cli/
-RUN pnpm --filter @thor/opencode-cli build
+RUN pnpm --filter @kally/opencode-cli build
 
 # Backward-compatible full build target for manual verification/debugging.
 FROM deps AS build
