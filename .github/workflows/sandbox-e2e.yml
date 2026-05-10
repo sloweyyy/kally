@@ -22,10 +22,10 @@ jobs:
     timeout-minutes: 60
     env:
       DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
-      GITHUB_APP_ID: ${{ vars.THOR_GITHUB_APP_ID }}
+      GITHUB_APP_ID: ${{ vars.THOR_GITHUB_APP_ID || '1' }}
       GITHUB_APP_PRIVATE_KEY_FILE: /var/lib/remote-cli/github-app/private-key.pem
       THOR_GITHUB_APP_PRIVATE_KEY: ${{ secrets.THOR_GITHUB_APP_PRIVATE_KEY }}
-      THOR_GITHUB_APP_INSTALLATION_ID: ${{ vars.THOR_GITHUB_APP_INSTALLATION_ID }}
+      THOR_GITHUB_APP_INSTALLATION_ID: ${{ vars.THOR_GITHUB_APP_INSTALLATION_ID || '1' }}
       # GitHub App identity — required by docker-compose since the webhook plan.
       # Sandbox e2e does not exercise webhook intake; ci-fake values satisfy
       # compose interpolation and remote-cli boot checks.
@@ -211,9 +211,15 @@ jobs:
 
           export CRON_SECRET="$(openssl rand -hex 32)"
           export THOR_INTERNAL_SECRET="$(openssl rand -hex 32)"
+          export KALLY_VAULT_MASTER_KEY="$(openssl rand -base64 32)"
+          export KALLY_VAULT_TOKEN="$(openssl rand -hex 32)"
+          export RESOLVE_SECRET="$(openssl rand -hex 32)"
           {
             echo "CRON_SECRET=$CRON_SECRET"
             echo "THOR_INTERNAL_SECRET=$THOR_INTERNAL_SECRET"
+            echo "KALLY_VAULT_MASTER_KEY=$KALLY_VAULT_MASTER_KEY"
+            echo "KALLY_VAULT_TOKEN=$KALLY_VAULT_TOKEN"
+            echo "RESOLVE_SECRET=$RESOLVE_SECRET"
             echo "DAYTONA_SNAPSHOT=$DAYTONA_SNAPSHOT"
           } >> "$GITHUB_ENV"
 
