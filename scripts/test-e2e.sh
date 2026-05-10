@@ -142,6 +142,14 @@ fi
 echo ""
 echo "=== Remote-CLI Git/GH Auth ==="
 
+# Forks without a real THOR_GITHUB_APP_PRIVATE_KEY can't mint installation
+# tokens, so the credential helper inside remote-cli intercepts the clone and
+# fails with "No key provided to sign". Skip git/gh auth assertions when the
+# key is empty (or the operator opted out via E2E_ALLOW_SKIP_GITHUB_APP_FLOW).
+if [[ "${E2E_ALLOW_SKIP_GITHUB_APP_FLOW:-}" == "1" || -z "${THOR_GITHUB_APP_PRIVATE_KEY:-}" ]]; then
+  echo "  ⊘ git/gh auth skipped: THOR_GITHUB_APP_PRIVATE_KEY is unset (forks without GitHub App credentials)."
+else
+
 [[ -n "$HOST_REMOTE_CLI_GIT_REPO_DIR" ]] && rm -rf "$HOST_REMOTE_CLI_GIT_REPO_DIR"
 [[ -n "$HOST_REMOTE_CLI_WORKTREE_DIR" ]] && rm -rf "$HOST_REMOTE_CLI_WORKTREE_DIR"
 mkdir -p "$(dirname "$HOST_REMOTE_CLI_GIT_REPO_DIR")" "$(dirname "$HOST_REMOTE_CLI_WORKTREE_DIR")"
@@ -243,6 +251,8 @@ if [[ -d "$HOST_REMOTE_CLI_GIT_REPO_DIR/.git" && "$clone_origin" == "$REMOTE_CLI
     "Internal exec worktree smoke: cloned repo registers the new worktree" \
     "worktree list: ${worktree_list:0:300}"
 fi
+
+fi  # end E2E_ALLOW_SKIP_GITHUB_APP_FLOW guard
 
 # ── 5. Approval Flow ────────────────────────────────────────────────────────
 
