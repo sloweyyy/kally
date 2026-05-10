@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { ApprovalRequiredEventPayloadSchema } from "./approval-events.js";
 
 // --- Individual event schemas ---
 
@@ -7,13 +8,24 @@ export const ProgressStartSchema = z.object({
   sessionId: z.string(),
   correlationKey: z.string().optional(),
   resumed: z.boolean(),
-  previousNotesPath: z.string().optional(),
 });
 
 export const ProgressToolSchema = z.object({
   type: z.literal("tool"),
   tool: z.string(),
-  status: z.enum(["completed", "error"]),
+  status: z.enum(["running", "completed", "error"]),
+});
+
+export const ProgressMemorySchema = z.object({
+  type: z.literal("memory"),
+  action: z.enum(["read", "write"]),
+  path: z.string(),
+  source: z.enum(["bootstrap", "tool"]),
+});
+
+export const ProgressDelegateSchema = z.object({
+  type: z.literal("delegate"),
+  agent: z.string(),
 });
 
 export const ProgressDoneSchema = z.object({
@@ -34,25 +46,26 @@ export const ProgressErrorSchema = z.object({
   error: z.string(),
 });
 
-export const ProgressApprovalRequiredSchema = z.object({
-  type: z.literal("approval_required"),
-  actionId: z.string(),
-  tool: z.string(),
-  args: z.record(z.string(), z.unknown()),
-  proxyName: z.string().optional(),
+export const ProgressApprovalRequiredSchema = ApprovalRequiredEventPayloadSchema;
+
+export const ProgressHeartbeatSchema = z.object({
+  type: z.literal("heartbeat"),
 });
 
 // --- Discriminated union ---
 
-export const ProgressEventSchema = z.discriminatedUnion("type", [
+export const ProgressEventSchema = z.union([
   ProgressStartSchema,
   ProgressToolSchema,
+  ProgressMemorySchema,
+  ProgressDelegateSchema,
   ProgressDoneSchema,
   ProgressErrorSchema,
   ProgressApprovalRequiredSchema,
+  ProgressHeartbeatSchema,
 ]);
 
-// --- REST endpoint request schemas ---
+// --- REST endpoint request schemas (slack-mcp) ---
 
 export const SlackProgressRequestSchema = z.object({
   channel: z.string(),
@@ -83,6 +96,8 @@ export type SlackApprovalRequest = z.infer<typeof SlackApprovalRequestSchema>;
 
 export type ProgressStart = z.infer<typeof ProgressStartSchema>;
 export type ProgressTool = z.infer<typeof ProgressToolSchema>;
+export type ProgressMemory = z.infer<typeof ProgressMemorySchema>;
+export type ProgressDelegate = z.infer<typeof ProgressDelegateSchema>;
 export type ProgressDone = z.infer<typeof ProgressDoneSchema>;
 export type ProgressError = z.infer<typeof ProgressErrorSchema>;
 export type ProgressApprovalRequired = z.infer<typeof ProgressApprovalRequiredSchema>;

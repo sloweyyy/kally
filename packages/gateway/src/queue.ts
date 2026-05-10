@@ -14,9 +14,22 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod/v4";
-import { createLogger, logError, logInfo } from "@kally/common";
+import {
+  createLogger,
+  ensureAnchorForCorrelationKey,
+  logError,
+  logInfo,
+  resolveCorrelationLockKey,
+} from "@kally/common";
 
 const log = createLogger("event-queue");
+
+function compareEvents(
+  a: { sourceTs: number; id: string },
+  b: { sourceTs: number; id: string },
+): number {
+  return a.sourceTs - b.sourceTs || a.id.localeCompare(b.id);
+}
 
 export interface QueuedEvent<T = unknown> {
   /** Unique event ID for dedup (e.g. Slack event_id). Retries with the same ID overwrite the file. */
@@ -71,12 +84,29 @@ export interface EventQueueOptions {
   disableInterval?: boolean;
 }
 
+export interface PendingQueueEventSnapshot {
+  id: string;
+  source: string;
+  correlationKey: string;
+  receivedAt: string;
+  sourceTs: number;
+  readyAt: number;
+  delayMs?: number;
+  interrupt?: boolean;
+}
+
+export interface PendingQueueSnapshot {
+  pending: PendingQueueEventSnapshot[];
+  pendingCount: number;
+  readError?: string;
+}
+
 export class EventQueue {
   private readonly dir: string;
   private readonly deadLetterDir: string;
   private readonly handler: EventHandler;
 
-  /** Per-key in-flight promise. Prevents the same key from dispatching twice in one cycle. */
+  /** Per-lock-key in-flight promise. Prevents one session/key from dispatching twice in one cycle. */
   private readonly processing = new Map<string, Promise<void>>();
   /** Incremented each time a handler calls ack or reject. Used by flush() to detect progress. */
   private ackCount = 0;
@@ -96,8 +126,9 @@ export class EventQueue {
     }
   }
 
-  /** Write an event to the queue directory (synchronous, atomic). */
-  enqueue(event: QueuedEvent): void {
+  /** Pre-bind a supported correlation anchor, then write an event atomically. */
+  async enqueue(event: QueuedEvent): Promise<void> {
+    const bound = await ensureAnchorForCorrelationKey(event.correlationKey);
     const ts = event.sourceTs.toString().padStart(15, "0");
     const filename = `${ts}_${event.id}.json`;
     const tmpPath = join(this.dir, `.${filename}.tmp`);
@@ -109,6 +140,7 @@ export class EventQueue {
     logInfo(log, "event_enqueued", {
       source: event.source,
       correlationKey: event.correlationKey,
+      ...(bound.anchorId ? { anchorId: bound.anchorId, anchorMinted: bound.minted } : {}),
     });
   }
 
@@ -142,6 +174,48 @@ export class EventQueue {
     }
   }
 
+  /** Read-only snapshot of current live pending events (no payloads). */
+  snapshotPending(): PendingQueueSnapshot {
+    let files: string[];
+    try {
+      files = readdirSync(this.dir)
+        .filter((f) => f.endsWith(".json") && !f.startsWith(".") && f !== "dead-letter")
+        .sort();
+    } catch (error) {
+      return {
+        pending: [],
+        pendingCount: 0,
+        readError: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const pending: PendingQueueEventSnapshot[] = [];
+    for (const file of files) {
+      try {
+        const raw = readFileSync(join(this.dir, file), "utf8");
+        const event = QueuedEventSchema.parse(JSON.parse(raw));
+        pending.push({
+          id: event.id,
+          source: event.source,
+          correlationKey: event.correlationKey,
+          receivedAt: event.receivedAt,
+          sourceTs: event.sourceTs,
+          readyAt: event.readyAt,
+          ...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+          ...(event.interrupt !== undefined ? { interrupt: event.interrupt } : {}),
+        });
+      } catch {
+        // Ignore unreadable/corrupt files for snapshot purposes.
+      }
+    }
+    pending.sort(compareEvents);
+
+    return {
+      pending,
+      pendingCount: pending.length,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------------
@@ -165,7 +239,7 @@ export class EventQueue {
       try {
         const raw = readFileSync(join(this.dir, file), "utf8");
         const event = QueuedEventSchema.parse(JSON.parse(raw));
-        const key = event.correlationKey;
+        const key = resolveCorrelationLockKey(event.correlationKey);
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key)!.push({ file, event });
       } catch {
@@ -178,6 +252,7 @@ export class EventQueue {
 
     for (const [key, entries] of byKey) {
       if (this.processing.has(key)) continue;
+      entries.sort((a, b) => compareEvents(a.event, b.event));
 
       // When interrupt events exist, readiness is based on interrupt events only
       // (non-interrupt events get swept in but don't delay the batch).
@@ -213,12 +288,16 @@ export class EventQueue {
   }
 
   private async processBatch(
-    key: string,
+    lockKey: string,
     entries: Array<{ file: string; event: QueuedEvent }>,
   ): Promise<void> {
     try {
+      const correlationKeys = [...new Set(entries.map((entry) => entry.event.correlationKey))];
+      const keyMetadata =
+        correlationKeys.length === 1 ? { correlationKey: correlationKeys[0] } : { correlationKeys };
       logInfo(log, "event_processing", {
-        correlationKey: key,
+        lockKey,
+        ...keyMetadata,
         count: entries.length,
         source: entries[0].event.source,
       });
@@ -244,16 +323,16 @@ export class EventQueue {
       );
 
       if (settled) {
-        logInfo(log, "event_completed", { correlationKey: key });
+        logInfo(log, "event_completed", { lockKey, ...keyMetadata });
       } else {
-        logInfo(log, "event_deferred", { correlationKey: key });
+        logInfo(log, "event_deferred", { lockKey, ...keyMetadata });
       }
     } catch (err) {
-      logError(log, "event_handler_error", err, { correlationKey: key });
+      logError(log, "event_handler_error", err, { lockKey });
       // Delete on error to prevent infinite retry loops.
       this.deleteFiles(entries);
     } finally {
-      this.processing.delete(key);
+      this.processing.delete(lockKey);
     }
   }
 }

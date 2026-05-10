@@ -1,21 +1,26 @@
-import { timingSafeEqual } from "node:crypto";
 import {
-  checkUserAccess,
-  computeSlackAlias,
+  appendCorrelationAlias,
+  computeSlackCorrelationKey,
   createLogger,
+  ExecResultSchema,
   extractRepoFromCwd,
-  formatKallyMeta,
+  getProxyConfig,
+  buildThorDisclaimerForSession,
+  isProxyName,
   getRepoUpstreams,
+  getRunnerBaseUrl,
+  ApprovalRequiredEventPayloadSchema,
   interpolateHeaders,
-  isAliasableMcpTool,
   logError,
   logInfo,
   logWarn,
+  PROXY_NAMES,
   type ConfigLoader,
   type ProxyConfig,
   type WorkspaceConfig,
   writeToolCallLog,
 } from "@kally/common";
+import type { ApprovalRequiredEventPayload } from "@kally/common";
 import { ApprovalStore, type ApprovalAction } from "./approval-store.js";
 import {
   classifyTool,
@@ -31,6 +36,21 @@ const DEFAULT_APPROVALS_DIR = "/workspace/data/approvals";
 const MAX_RECONNECT_ATTEMPTS = 5;
 const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30_000;
+
+function addDisclaimerToApprovalArgs(
+  tool: string,
+  args: Record<string, unknown>,
+  sessionId?: string,
+): Record<string, unknown> {
+  if (tool !== "createJiraIssue" && tool !== "addCommentToJiraIssue") return args;
+  const footer = buildThorDisclaimerForSession(sessionId, getRunnerBaseUrl()).footer;
+  const field = tool === "createJiraIssue" ? "description" : "commentBody";
+  if (typeof args[field] !== "string")
+    throw new Error(
+      `Cannot create approval: ${tool}.${field} must be a string for disclaimer injection`,
+    );
+  return { ...args, [field]: `${args[field]}\n${footer}` };
+}
 
 interface ProxyInstance {
   name: string;
@@ -48,20 +68,12 @@ export interface McpCommandContext {
   directory?: string;
   sessionId?: string;
   callId?: string;
-  resolveSecret?: string;
-  /** Slack UID forwarded from the gateway (x-kally-user-slack-id). Used by
-   *  checkUserAccess to enforce per-upstream `access` policies. */
-  userSlackId?: string;
-  /** Email forwarded from the gateway (x-kally-user-email). Primary key for
-   *  support/katalon policy membership. */
-  userEmail?: string;
 }
 
 export interface McpServiceDeps {
   getConfig: ConfigLoader;
   approvalsDir?: string;
   isProduction?: boolean;
-  resolveSecret?: string;
   connectUpstreamFn?: typeof connectUpstream;
   writeToolCallLogFn?: typeof writeToolCallLog;
 }
@@ -132,27 +144,37 @@ export function createMcpService(deps: McpServiceDeps): McpService {
   const instances = new Map<string, ProxyInstance>();
   const connecting = new Map<string, Promise<ProxyInstance>>();
   const approvalStores = new Map<string, ApprovalStore>();
+  const resolvingApprovals = new Map<
+    string,
+    {
+      decision: "approved" | "rejected";
+      reviewer: string;
+      reason?: string;
+      promise: Promise<McpExecResult>;
+    }
+  >();
 
   function getConfig(): WorkspaceConfig {
     return deps.getConfig();
   }
 
-  function getThorIds(context: McpCommandContext): {
-    sessionId?: string;
-    callId?: string;
-    userSlackId?: string;
-    userEmail?: string;
-  } {
+  function getThorIds(context: McpCommandContext): { sessionId?: string; callId?: string } {
     return {
       ...(context.sessionId && { sessionId: context.sessionId }),
       ...(context.callId && { callId: context.callId }),
-      ...(context.userSlackId && { userSlackId: context.userSlackId }),
-      ...(context.userEmail && { userEmail: context.userEmail }),
     };
   }
 
   function getConfiguredUpstreamNames(): string[] {
-    return Object.keys(getConfig().proxies ?? {});
+    const enabled = new Set<string>();
+    for (const repo of Object.values(getConfig().repos)) {
+      for (const upstreamName of repo.proxies ?? []) {
+        if (isProxyName(upstreamName)) {
+          enabled.add(upstreamName);
+        }
+      }
+    }
+    return PROXY_NAMES.filter((name) => enabled.has(name));
   }
 
   function getApprovalStore(name: string): ApprovalStore {
@@ -240,8 +262,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
   }
 
   async function getInstance(name: string): Promise<ProxyInstance | undefined> {
-    const config = getConfig();
-    const proxyDef = config.proxies?.[name];
+    const proxyDef = getProxyConfig(name);
     if (!proxyDef) {
       instances.delete(name);
       return undefined;
@@ -283,14 +304,13 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     if (allowed === undefined) {
       return fail(`Repo "${repo}" not found in config`);
     }
-    return allowed.filter((name) => config.proxies?.[name]);
+    return allowed.filter(isProxyName);
   }
 
   async function listVisibleTools(
     upstreamName: string,
     repo: string,
   ): Promise<ToolInfo[] | McpExecResult> {
-    const config = getConfig();
     const allowed = getAllowedUpstreamsForRepo(repo);
     if (!Array.isArray(allowed)) return allowed;
     if (!allowed.includes(upstreamName)) {
@@ -304,7 +324,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       return fail(`Unknown upstream "${upstreamName}".`);
     }
 
-    const proxyDef = config.proxies?.[upstreamName];
+    const proxyDef = getProxyConfig(upstreamName);
     const allow = proxyDef?.allow ?? [];
     const approve = proxyDef?.approve ?? [];
 
@@ -387,6 +407,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     logEvent: string;
     decision: "allowed" | "blocked" | "pending" | "approved" | "rejected";
     extraLogFields?: Record<string, unknown>;
+    sessionId?: string;
     inputSchema?: unknown;
     onSuccess?: (rawResult: unknown) => void;
     onError?: (message: string) => void;
@@ -410,10 +431,24 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       writeToolCallLogFn({ tool: toolName, decision, args, result, durationMs: duration });
       opts.onSuccess?.(result);
 
-      let stdout = unwrapResult(result);
-      if (isAliasableMcpTool(toolName)) {
-        const alias = computeSlackAlias(args, stdout);
-        if (alias) stdout += formatKallyMeta(alias);
+      const stdout = unwrapResult(result);
+      if (toolName === "post_message" && opts.sessionId) {
+        const correlationKey = computeSlackCorrelationKey(args, stdout);
+        if (correlationKey) {
+          const aliasResult = appendCorrelationAlias(opts.sessionId, correlationKey);
+          if (aliasResult.ok) {
+            logInfo(log, "alias_registered", {
+              sessionId: opts.sessionId,
+              correlationKey,
+              source: "mcp:post_message",
+            });
+          } else {
+            logError(log, "alias_registration_error", aliasResult.error.message, {
+              sessionId: opts.sessionId,
+              correlationKey,
+            });
+          }
+        }
       }
       return ok(stdout);
     } catch (err) {
@@ -447,44 +482,35 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       return fail(`Unknown upstream "${upstreamName}".`);
     }
 
-    // Enforce the proxy's access policy using the caller identity forwarded
-    // from the gateway via x-kally-user-* headers. Policy values: "public"
-    // (default, no-op), "katalon" (email must match a configured suffix),
-    // "support" (email must be on the support_team_emails list).
-    const proxy = getConfig().proxies?.[upstreamName];
-    if (proxy) {
-      const decision = checkUserAccess(getConfig(), proxy, {
-        user_id: context.userSlackId,
-        user_email: context.userEmail,
-      });
-      if (!decision.ok) {
-        logWarn(log, "tool_call_access_denied", {
-          upstream: upstreamName,
-          tool: toolInfo.name,
-          reason: decision.reason,
-          ...getThorIds(context),
-        });
-        return fail(`access_denied: ${decision.reason} — ${decision.message}\n`);
-      }
-    }
-
     if (toolInfo.classification === "approve") {
-      const action = instance.approvalStore.create(toolInfo.name, args);
+      let approvalArgs: Record<string, unknown>;
+      try {
+        approvalArgs = addDisclaimerToApprovalArgs(toolInfo.name, args, context.sessionId);
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+      const action = instance.approvalStore.create(toolInfo.name, approvalArgs);
       logInfo(log, "tool_call_pending_approval", {
         upstream: instance.name,
         tool: toolInfo.name,
         actionId: action.id,
         ...getThorIds(context),
       });
-      writeToolCallLogFn({ tool: toolInfo.name, decision: "pending", args });
-      const approvalText = `Approval required for \`${toolInfo.name}\`. Run: approval status ${action.id}`;
-      const approvalMeta = formatKallyMeta({
-        type: "approval",
-        actionId: action.id,
-        proxyName: instance.name,
-        tool: toolInfo.name,
-      });
-      return ok(`${approvalText}${approvalMeta}`);
+      writeToolCallLogFn({ tool: toolInfo.name, decision: "pending", args: approvalArgs });
+      const approvalRequired: ApprovalRequiredEventPayload =
+        ApprovalRequiredEventPayloadSchema.parse({
+          type: "approval_required",
+          actionId: action.id,
+          proxyName: instance.name,
+          tool: toolInfo.name,
+          args: action.args,
+        });
+      return ok(
+        stringify({
+          ...approvalRequired,
+          command: `approval status ${action.id}`,
+        }),
+      );
     }
 
     return executeUpstreamCall({
@@ -494,6 +520,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       logEvent: "tool_call",
       decision: "allowed",
       extraLogFields: getThorIds(context),
+      sessionId: context.sessionId,
       inputSchema: toolInfo.inputSchema,
     });
   }
@@ -509,31 +536,85 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     return undefined;
   }
 
+  function storedApprovedResult(action: ApprovalAction): McpExecResult {
+    const parsed = ExecResultSchema.safeParse(action.result);
+    if (!parsed.success) {
+      return fail(
+        `Stored approved result for approval action ${action.id} is invalid: ${parsed.error.message}`,
+      );
+    }
+    return parsed.data;
+  }
+
   async function resolveApprovalAction(
     actionId: string,
     decision: "approved" | "rejected",
     reviewer: string,
     reason: string | undefined,
   ): Promise<McpExecResult> {
-    const lookup = findApproval(actionId);
+    const inFlight = resolvingApprovals.get(actionId);
+    if (inFlight) {
+      if (inFlight.decision !== decision) {
+        return fail(
+          `Approval action ${actionId} is already resolving as ${inFlight.decision}; cannot also resolve as ${decision}`,
+        );
+      }
+      if (inFlight.reviewer !== reviewer || inFlight.reason !== reason) {
+        return fail(
+          `Approval action ${actionId} is already resolving for reviewer ${inFlight.reviewer}; cannot also resolve as ${reviewer}`,
+        );
+      }
+      return inFlight.promise;
+    }
+
+    const promise = resolveApprovalActionOnce(actionId, decision, reviewer, reason);
+    resolvingApprovals.set(actionId, { decision, reviewer, reason, promise });
+    try {
+      return await promise;
+    } finally {
+      resolvingApprovals.delete(actionId);
+    }
+  }
+
+  async function resolveApprovalActionOnce(
+    actionId: string,
+    decision: "approved" | "rejected",
+    reviewer: string,
+    reason: string | undefined,
+  ): Promise<McpExecResult> {
+    let lookup: ApprovalLookup | undefined;
+    try {
+      lookup = findApproval(actionId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return fail(`Failed to load approval action ${actionId}: ${message}`);
+    }
     if (!lookup) {
       return fail(`No approval action found with ID: ${actionId}`);
     }
 
     if (lookup.action.status !== "pending") {
-      return fail("Not found or already resolved");
+      if (lookup.action.status !== decision) {
+        return fail(
+          `Approval action ${actionId} is already ${lookup.action.status}; cannot resolve as ${decision}`,
+        );
+      }
+      if (lookup.action.status === "approved") {
+        return storedApprovedResult(lookup.action);
+      }
+      return ok(stringify(lookup.action));
     }
-    const action = lookup.store.resolveLoaded(lookup.action, decision, reviewer, reason);
 
     if (decision === "rejected") {
+      const rejected = lookup.store.rejectLoaded(lookup.action, reviewer, reason);
       logInfo(log, "tool_call_rejected", {
         upstream: lookup.upstreamName,
-        tool: action.tool,
-        actionId: action.id,
+        tool: rejected.tool,
+        actionId: rejected.id,
         reviewer,
       });
-      writeToolCallLogFn({ tool: action.tool, decision: "rejected", args: action.args });
-      return ok(stringify(action));
+      writeToolCallLogFn({ tool: rejected.tool, decision: "rejected", args: rejected.args });
+      return ok(stringify(rejected));
     }
 
     const instance = await getInstance(lookup.upstreamName);
@@ -541,22 +622,24 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       return fail(`Unknown upstream "${lookup.upstreamName}".`);
     }
 
-    return executeUpstreamCall({
+    const pendingAction = lookup.action;
+    const result = await executeUpstreamCall({
       instance,
-      toolName: action.tool,
-      args: action.args,
+      toolName: pendingAction.tool,
+      args: pendingAction.args,
       logEvent: "tool_call_approved",
       decision: "approved",
-      extraLogFields: { actionId: action.id },
-      onSuccess: (rawResult) => {
-        action.result = rawResult;
-        lookup.store.update(action);
-      },
+      extraLogFields: { actionId: pendingAction.id },
       onError: (message) => {
-        action.error = message;
-        lookup.store.update(action);
+        pendingAction.error = message;
+        lookup.store.update(pendingAction);
       },
     });
+    if (result.exitCode !== 0) {
+      return result;
+    }
+    lookup.store.approveLoaded(pendingAction, result, reviewer, reason);
+    return result;
   }
 
   return {
@@ -612,14 +695,6 @@ export function createMcpService(deps: McpServiceDeps): McpService {
 
     async executeMcp(args: string[], context: McpCommandContext): Promise<McpExecResult> {
       if (args[0] === "resolve") {
-        const secretOk =
-          deps.resolveSecret &&
-          context.resolveSecret &&
-          deps.resolveSecret.length === context.resolveSecret.length &&
-          timingSafeEqual(Buffer.from(deps.resolveSecret), Buffer.from(context.resolveSecret));
-        if (!secretOk) {
-          return fail("Unknown subcommand: resolve\n");
-        }
         if (args.length < 4) {
           return fail("Usage: mcp resolve <action-id> <approved|rejected> <reviewer> [reason]\n");
         }
@@ -680,7 +755,13 @@ export function createMcpService(deps: McpServiceDeps): McpService {
         if (!args[1]) {
           return fail("Usage: approval status <action-id>\n");
         }
-        const lookup = findApproval(args[1]);
+        let lookup: ApprovalLookup | undefined;
+        try {
+          lookup = findApproval(args[1]);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return fail(`Failed to load approval action ${args[1]}: ${message}`);
+        }
         if (!lookup) {
           return fail(`No approval action found with ID: ${args[1]}\n`);
         }

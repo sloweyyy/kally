@@ -2,6 +2,12 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  appendAlias,
+  appendCorrelationAliasForAnchor,
+  mintAnchor,
+  resolveAnchorForCorrelationKey,
+} from "@kally/common";
 import { EventQueue, type EventHandler, type QueuedEvent } from "./queue.js";
 
 let queueDir: string;
@@ -21,10 +27,12 @@ beforeEach(() => {
   queue = null;
   eventSeq = 0;
   now = BASE_TIME;
+  vi.stubEnv("WORKLOG_DIR", join(queueDir, "worklog"));
 });
 
 afterEach(() => {
   queue?.close();
+  vi.unstubAllEnvs();
   rmSync(queueDir, { recursive: true, force: true });
 });
 
@@ -80,7 +88,7 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "hello"));
+    await queue.enqueue(makeEvent("key-1", "hello"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -93,9 +101,9 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "first"));
-    queue.enqueue(makeEvent("key-1", "second"));
-    queue.enqueue(makeEvent("key-1", "third"));
+    await queue.enqueue(makeEvent("key-1", "first"));
+    await queue.enqueue(makeEvent("key-1", "second"));
+    await queue.enqueue(makeEvent("key-1", "third"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -106,12 +114,27 @@ describe("EventQueue", () => {
     expect((batch[2].payload as { text: string }).text).toBe("third");
   });
 
+  it("dispatches same-key events chronologically even when filenames sort differently", async () => {
+    const handler = ackHandler();
+    queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
+
+    const late = { ...makeEvent("key-1", "late"), id: "a-late", sourceTs: BASE_TIME + 200 };
+    const early = { ...makeEvent("key-1", "early"), id: "z-early", sourceTs: BASE_TIME + 100 };
+    writeFileSync(join(queueDir, "000000000000001_a-late.json"), JSON.stringify(late), "utf8");
+    writeFileSync(join(queueDir, "999999999999999_z-early.json"), JSON.stringify(early), "utf8");
+
+    await queue.flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(batchTexts(handler)).toEqual([["early", "late"]]);
+  });
+
   it("processes independent keys concurrently", async () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-a", "alpha"));
-    queue.enqueue(makeEvent("key-b", "beta"));
+    await queue.enqueue(makeEvent("key-a", "alpha"));
+    await queue.enqueue(makeEvent("key-b", "beta"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(2);
@@ -119,6 +142,83 @@ describe("EventQueue", () => {
       .map((c: [QueuedEvent[], () => void]) => c[0][0].correlationKey)
       .sort();
     expect(keys).toEqual(["key-a", "key-b"]);
+  });
+
+  it("batches different raw keys that resolve to the same anchor", async () => {
+    const anchorId = mintAnchor();
+    expect(
+      appendAlias({
+        aliasType: "opencode.session",
+        aliasValue: "session-1",
+        anchorId,
+      }),
+    ).toEqual({ ok: true });
+    expect(appendCorrelationAliasForAnchor(anchorId, "slack:thread:1710000000.001")).toEqual({
+      ok: true,
+    });
+    expect(appendCorrelationAliasForAnchor(anchorId, "git:branch:thor:feature/shared")).toEqual({
+      ok: true,
+    });
+
+    const handler = ackHandler();
+    queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
+
+    await queue.enqueue(makeEvent("slack:thread:1710000000.001", "slack"));
+    await queue.enqueue({
+      ...makeEvent("git:branch:thor:feature/shared", "github"),
+      source: "github",
+    });
+    expect(resolveAnchorForCorrelationKey("slack:thread:1710000000.001")).toBe(anchorId);
+    expect(resolveAnchorForCorrelationKey("git:branch:thor:feature/shared")).toBe(anchorId);
+    await queue.flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0].map((event) => event.correlationKey)).toEqual([
+      "slack:thread:1710000000.001",
+      "git:branch:thor:feature/shared",
+    ]);
+  });
+
+  it("does not redispatch an in-flight file when its correlation alias appears", async () => {
+    const key = "slack:thread:1710000000.010";
+    let markFirstStarted!: () => void;
+    let releaseFirst!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const holdFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const handler = vi.fn<EventHandler>().mockImplementation(async (_events, ack) => {
+      if (handler.mock.calls.length === 1) {
+        const existing = resolveAnchorForCorrelationKey(key);
+        if (!existing) {
+          const anchorId = mintAnchor();
+          expect(appendCorrelationAliasForAnchor(anchorId, key)).toEqual({ ok: true });
+        }
+        markFirstStarted();
+        await holdFirst;
+        ack();
+        return;
+      }
+      ack();
+    });
+
+    queue = new EventQueue({ dir: queueDir, handler, intervalMs: 5 });
+
+    await queue.enqueue(makeEvent(key, "first"));
+    await firstStarted;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await queue.flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const remaining = readdirSync(queueDir).filter((f) => f.endsWith(".json"));
+    expect(remaining).toHaveLength(0);
   });
 
   it("batches events that arrive during in-flight processing separately", async () => {
@@ -138,13 +238,13 @@ describe("EventQueue", () => {
 
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "first"));
+    await queue.enqueue(makeEvent("key-1", "first"));
     const flushPromise = queue.flush();
 
     await new Promise((r) => setTimeout(r, 50));
 
-    queue.enqueue(makeEvent("key-1", "second"));
-    queue.enqueue(makeEvent("key-1", "third"));
+    await queue.enqueue(makeEvent("key-1", "second"));
+    await queue.enqueue(makeEvent("key-1", "third"));
 
     resolveFirst!();
     await flushPromise;
@@ -156,7 +256,7 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "hello"));
+    await queue.enqueue(makeEvent("key-1", "hello"));
     await queue.flush();
 
     const remaining = readdirSync(queueDir).filter((f) => f.endsWith(".json"));
@@ -169,7 +269,7 @@ describe("EventQueue", () => {
     });
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "deferred"));
+    await queue.enqueue(makeEvent("key-1", "deferred"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -185,7 +285,7 @@ describe("EventQueue", () => {
     });
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "retry-me"));
+    await queue.enqueue(makeEvent("key-1", "retry-me"));
 
     // First flush: handler doesn't ack → files stay
     await queue.flush();
@@ -211,12 +311,56 @@ describe("EventQueue", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("provides a read-only snapshot of live pending queue events", async () => {
+    const handler = ackHandler();
+    queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
+
+    await queue.enqueue(makeEvent("key-1", "first"));
+    await queue.enqueue(makeMention("key-2", "second"));
+
+    writeFileSync(join(queueDir, ".ignored.tmp"), JSON.stringify(makeEvent("key-x", "tmp")));
+    writeFileSync(
+      join(queueDir, "dead-letter", "000000000000000_dead.json"),
+      JSON.stringify(makeEvent("key-x", "dead")),
+    );
+
+    const snapshot = queue.snapshotPending();
+
+    expect(snapshot.pendingCount).toBe(2);
+    expect(snapshot.pending).toHaveLength(2);
+    expect(snapshot.pending[0]).toMatchObject({
+      source: "slack",
+      correlationKey: "key-1",
+    });
+    expect(snapshot.pending[0]).not.toHaveProperty("payload");
+    expect(snapshot.pending[1]).toMatchObject({
+      source: "slack",
+      correlationKey: "key-2",
+      interrupt: true,
+    });
+  });
+
+  it("reports snapshot read failures explicitly", () => {
+    const handler = ackHandler();
+    queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
+
+    rmSync(queueDir, { recursive: true, force: true });
+
+    const snapshot = queue.snapshotPending();
+
+    expect(snapshot).toMatchObject({
+      pending: [],
+      pendingCount: 0,
+      readError: expect.any(String),
+    });
+  });
+
   it("handles corrupt files without crashing", async () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
     writeFileSync(join(queueDir, "000000000000000_corrupt.json"), "not json{{{");
-    queue.enqueue(makeEvent("key-1", "valid"));
+    await queue.enqueue(makeEvent("key-1", "valid"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -241,8 +385,8 @@ describe("EventQueue", () => {
       delayMs: 0,
     };
 
-    queue.enqueue(event);
-    queue.enqueue({ ...event, payload: { text: "retry" } });
+    await queue.enqueue(event);
+    await queue.enqueue({ ...event, payload: { text: "retry" } });
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(1);
@@ -259,7 +403,7 @@ describe("EventQueue", () => {
 
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "will-fail"));
+    await queue.enqueue(makeEvent("key-1", "will-fail"));
     await queue.flush();
 
     // Files deleted on error
@@ -267,7 +411,7 @@ describe("EventQueue", () => {
     expect(remaining).toHaveLength(0);
 
     // Subsequent events still process
-    queue.enqueue(makeEvent("key-1", "will-succeed"));
+    await queue.enqueue(makeEvent("key-1", "will-succeed"));
     await queue.flush();
 
     expect(handler).toHaveBeenCalledTimes(2);
@@ -281,7 +425,7 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeMention("key-1", "hey @kally"));
+    await queue.enqueue(makeMention("key-1", "hey @thor"));
 
     // Before debounce window
     setTime(BASE_TIME + 2_999);
@@ -292,14 +436,14 @@ describe("EventQueue", () => {
     setTime(BASE_TIME + 3_000);
     await queue.flush();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(batchTexts(handler)).toEqual([["hey @kally"]]);
+    expect(batchTexts(handler)).toEqual([["hey @thor"]]);
   });
 
   it("S4: non-mention, no session — fires after 60s", async () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "just a message", 60_000));
+    await queue.enqueue(makeEvent("key-1", "just a message", 60_000));
 
     setTime(BASE_TIME + 59_999);
     await queue.flush();
@@ -316,11 +460,11 @@ describe("EventQueue", () => {
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
     // Mention at T+0 (readyAt = T+3s)
-    queue.enqueue(makeMention("key-1", "mention-1"));
+    await queue.enqueue(makeMention("key-1", "mention-1"));
 
     // Mention at T+1s (readyAt = T+4s) — slides the window
     setTime(BASE_TIME + 1_000);
-    queue.enqueue(makeMention("key-1", "mention-2"));
+    await queue.enqueue(makeMention("key-1", "mention-2"));
 
     // At T+3.5s — first mention's readyAt passed but batch max is T+4s
     setTime(BASE_TIME + 3_500);
@@ -339,11 +483,11 @@ describe("EventQueue", () => {
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
     // Non-mention at T+0 with 60s delay
-    queue.enqueue(makeEvent("key-1", "unaddressed", 60_000));
+    await queue.enqueue(makeEvent("key-1", "unaddressed", 60_000));
 
     // Mention arrives at T+10s with 3s delay (readyAt = T+13s)
     setTime(BASE_TIME + 10_000);
-    queue.enqueue(makeMention("key-1", "hey @kally"));
+    await queue.enqueue(makeMention("key-1", "hey @thor"));
 
     // At T+12.999s — not ready (interrupt readyAt = T+13s)
     setTime(BASE_TIME + 12_999);
@@ -356,7 +500,7 @@ describe("EventQueue", () => {
     expect(handler).toHaveBeenCalledTimes(1);
     const texts = batchTexts(handler)[0];
     expect(texts).toContain("unaddressed");
-    expect(texts).toContain("hey @kally");
+    expect(texts).toContain("hey @thor");
   });
 
   it("S8: mention in thread A while session runs for thread B — independent", async () => {
@@ -364,9 +508,9 @@ describe("EventQueue", () => {
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
     // Thread A mention
-    queue.enqueue(makeMention("key-a", "mention-A"));
+    await queue.enqueue(makeMention("key-a", "mention-A"));
     // Thread B mention
-    queue.enqueue(makeMention("key-b", "mention-B"));
+    await queue.enqueue(makeMention("key-b", "mention-B"));
 
     setTime(BASE_TIME + 3_000);
     await queue.flush();
@@ -387,7 +531,7 @@ describe("EventQueue", () => {
     const handler = ackHandler();
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeMention("key-1", "mention", 60_000));
+    await queue.enqueue(makeMention("key-1", "mention", 60_000));
 
     await queue.flush();
     expect(handler).not.toHaveBeenCalled();
@@ -402,10 +546,10 @@ describe("EventQueue", () => {
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
     // Non-interrupt with readyAt far in the future
-    queue.enqueue(makeEvent("key-1", "unaddressed", 60_000));
+    await queue.enqueue(makeEvent("key-1", "unaddressed", 60_000));
 
     // Interrupt that is ready now
-    queue.enqueue({
+    await queue.enqueue({
       id: `test-${++eventSeq}`,
       source: "slack",
       correlationKey: "key-1",
@@ -440,12 +584,12 @@ describe("EventQueue", () => {
 
     queue = new EventQueue({ dir: queueDir, handler, disableInterval: true });
 
-    queue.enqueue(makeEvent("key-1", "first"));
+    await queue.enqueue(makeEvent("key-1", "first"));
     const flushPromise = queue.flush();
 
     await new Promise((r) => setTimeout(r, 50));
 
-    queue.enqueue(makeEvent("key-1", "non-interrupt"));
+    await queue.enqueue(makeEvent("key-1", "non-interrupt"));
 
     resolveFirst!();
     await flushPromise;

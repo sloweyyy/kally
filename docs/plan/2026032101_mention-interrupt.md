@@ -1,6 +1,8 @@
 # Mention Interrupt — 2026-03-21-01
 
-> Mentions (`@kally`) should interrupt a running opencode session. Non-mention messages should never interrupt — they wait until the session is idle.
+> **Superseded note (2026-04-24):** the GitHub-specific mention details in this historical plan are outdated. GitHub mention detection now derives identities from `GITHUB_APP_SLUG` (`<slug>` and `<slug>[bot]`), not `GIT_USER_NAME`. Keep this document as historical design context only; use the current GitHub webhook docs/plan for live behavior.
+
+> Mentions (`@thor`) should interrupt a running opencode session. Non-mention messages should never interrupt — they wait until the session is idle.
 
 ## Architecture
 
@@ -12,28 +14,28 @@
 
 ## Interrupt rules
 
-| Source                                           | Interrupt | Delay   |
-| ------------------------------------------------ | --------- | ------- | ----------------------------------------------------------------- |
-| Slack `app_mention`                              | true      | 3s      |
-| Slack `message` (engaged — Kally replied before) | false     | 3s      |
-| ~~Slack `message` (not engaged)~~                | ~~false~~ | ~~60s~~ | **Obsolete** — dropped since `2026041301_slack-drop-unengaged.md` |
-| GitHub with `@GIT_USER_NAME` in body             | true      | 3s      |
-| GitHub without mention                           | false     | 60s     |
-| Cron                                             | false     | 0s      |
+| Source                                          | Interrupt | Delay   |
+| ----------------------------------------------- | --------- | ------- | ----------------------------------------------------------------- |
+| Slack `app_mention`                             | true      | 0s      |
+| Slack `message` (engaged — Thor replied before) | false     | 3s      |
+| ~~Slack `message` (not engaged)~~               | ~~false~~ | ~~60s~~ | **Obsolete** — dropped since `2026041301_slack-drop-unengaged.md` |
+| GitHub with `@GIT_USER_NAME` in body            | true      | 3s      |
+| GitHub without mention                          | false     | 60s     |
+| Cron                                            | false     | 0s      |
 
 Default for new sources: `interrupt: false`. The runner treats unset interrupt as false.
 
-"Engaged" means the worklog notes for the correlation key contain a `slack_post_message` tool call — i.e. Kally has actively replied in the thread before. This is checked via `hasSlackReply()` in `@kally/common`.
+"Engaged" means the worklog notes for the correlation key contain a `slack_post_message` tool call — i.e. Thor has actively replied in the thread before. This is checked via `hasSlackReply()` in `@thor/common`.
 
 ## Scenarios
 
 ### S1: Mention while idle
 
-Mention enqueued with `interrupt: true`, 3s delay. After 3s, queue fires → runner creates/resumes session → processes prompt.
+Mention enqueued with `interrupt: true`, 0s delay. Queue fires immediately → runner creates/resumes session → processes prompt.
 
 ### S2: Mention while session is running (same thread)
 
-Mention enqueued with `interrupt: true`, 3s delay. After 3s, queue fires → runner sees busy session → aborts → waits for idle → sends new prompt.
+Mention enqueued with `interrupt: true`, 0s delay. Queue fires immediately → runner sees busy session → aborts → waits for idle → sends new prompt.
 
 ### S3: Non-mention while session is running (same thread)
 
@@ -49,7 +51,7 @@ Mention enqueued with `interrupt: true`, 3s delay. After 3s, queue fires → run
 
 ### S5: Multiple rapid mentions (same thread)
 
-Mention at T+0 (readyAt=T+3). Mention at T+1 (readyAt=T+4). Queue uses `max(readyAt)` of interrupt events = T+4. Both fire together at T+4. Sliding debounce window.
+Mentions fire immediately (0s delay). Each mention fires as soon as the per-key lock is free. The runner aborts the in-flight session for each new mention; opencode's abort handling collapses rapid-fire aborts into the terminal state the runner waits on before sending the next prompt. No gateway-side debounce window.
 
 ### S6: Non-mention pending, then mention arrives (same thread)
 
@@ -59,7 +61,7 @@ Mention at T+0 (readyAt=T+3). Mention at T+1 (readyAt=T+4). Queue uses `max(read
 
 ### S7: Mention fires, session starts, then non-mention arrives
 
-> **Obsolete** — see `2026041301_slack-drop-unengaged.md`. After a mention creates a session and Kally replies, the thread becomes engaged — subsequent non-mentions use 3s delay instead of 60s.
+> **Obsolete** — see `2026041301_slack-drop-unengaged.md`. After a mention creates a session and Thor replies, the thread becomes engaged — subsequent non-mentions use 3s delay instead of 60s.
 
 ~~Mention fires at T, session starts. Non-mention at T+5 (readyAt=T+65). After 65s, fires with `interrupt: false` → runner returns `{busy: true}` → retried until session finishes.~~
 
@@ -96,13 +98,13 @@ Different correlation keys. Independent per-key locks. No cross-key blocking.
 
 ## Decision log
 
-| #   | Decision                                                        | Rationale                                                                                                                                                                                                          |
-| --- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | Handler stays fire-and-forget                                   | Runner handles abort/resume. Awaiting would hold locks for minutes.                                                                                                                                                |
-| D2  | Drop global lock, keep per-key only                             | Global lock blocks unrelated keys. Per-key is correct granularity.                                                                                                                                                 |
-| D3  | Fix at both layers (gateway + runner)                           | Remove `hasRunnerSession` so non-mentions get 60s delay. Runner also checks interrupt flag as defense in depth.                                                                                                    |
-| D4  | At-least-once via ack callback                                  | Don't delete files until runner accepts. Crash or busy → files stay for retry. Duplicates are fine (opencode handles them).                                                                                        |
-| D5  | `interrupt` defaults to false (safe by default)                 | New sources should not interrupt. Only Slack mentions and GitHub @mentions set `interrupt: true`.                                                                                                                  |
-| D6  | Standardize delays: interrupt=3s, non-interrupt=60s             | Consistent across all sources. Interrupt events debounce briefly then fire. Non-interrupt events wait hoping someone else handles it.                                                                              |
-| D7  | Engaged-thread heuristic for Slack (3s if Kally replied before) | If Kally has `slack_post_message` in worklog notes → user expects Kally to stay responsive. Uses short delay without interrupt.                                                                                    |
-| D8  | Defer similar heuristic for GitHub                              | GitHub interactions go through `bash` (gh CLI), so the tool name is too generic to reliably detect engagement. Revisit when we have a clearer signal (e.g. dedicated GitHub MCP tools or richer worklog metadata). |
+| #   | Decision                                                       | Rationale                                                                                                                                                                                                          |
+| --- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | Handler stays fire-and-forget                                  | Runner handles abort/resume. Awaiting would hold locks for minutes.                                                                                                                                                |
+| D2  | Drop global lock, keep per-key only                            | Global lock blocks unrelated keys. Per-key is correct granularity.                                                                                                                                                 |
+| D3  | Fix at both layers (gateway + runner)                          | Remove `hasRunnerSession` so non-mentions get 60s delay. Runner also checks interrupt flag as defense in depth.                                                                                                    |
+| D4  | At-least-once via ack callback                                 | Don't delete files until runner accepts. Crash or busy → files stay for retry. Duplicates are fine (opencode handles them).                                                                                        |
+| D5  | `interrupt` defaults to false (safe by default)                | New sources should not interrupt. Only Slack mentions and GitHub @mentions set `interrupt: true`.                                                                                                                  |
+| D6  | Standardize delays: interrupt=0s, non-interrupt=60s            | Interrupt events fire immediately (users expect instant response when they @mention). Non-interrupt events wait, hoping someone else handles it.                                                                   |
+| D7  | Engaged-thread heuristic for Slack (3s if Thor replied before) | If Thor has `slack_post_message` in worklog notes → user expects Thor to stay responsive. Uses short delay without interrupt.                                                                                      |
+| D8  | Defer similar heuristic for GitHub                             | GitHub interactions go through `bash` (gh CLI), so the tool name is too generic to reliably detect engagement. Revisit when we have a clearer signal (e.g. dedicated GitHub MCP tools or richer worklog metadata). |

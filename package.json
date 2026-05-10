@@ -1,7 +1,7 @@
 {
   "name": "kally",
   "private": true,
-  "packageManager": "pnpm@9.15.4",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "test:mcp": "npx tsx scripts/test-mcp.ts",
     "test:e2e": "./scripts/test-e2e.sh",
+    "test:opencode-e2e": "./scripts/test-opencode-e2e.sh",
+    "test:sandbox-e2e": "./scripts/test-sandbox-e2e.sh",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -23,6 +25,6 @@
     "lint-staged": "^16.3.2",
     "prettier": "^3.8.1",
     "tsup": "^8.5.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.5"
   }
 }
