@@ -19,7 +19,7 @@ set -euo pipefail
 REMOTE_CLI_URL="${REMOTE_CLI_URL:-http://localhost:3004}"
 HOST_WORKSPACE="${HOST_WORKSPACE:-./docker-volumes/workspace}"
 REMOTE_CLI_GIT_REPO_URL="${REMOTE_CLI_GIT_REPO_URL:-https://github.com/scoutqa-dot-ai/thor}"
-REMOTE_CLI_GIT_REPO_NAME="${REMOTE_CLI_GIT_REPO_NAME:-scoutqa-dot-ai-thor-sandbox-e2e}"
+REMOTE_CLI_GIT_REPO_NAME="${REMOTE_CLI_GIT_REPO_NAME:-scoutqa-dot-ai-kally-sandbox-e2e}"
 REMOTE_CLI_GIT_REPO_DIR="${REMOTE_CLI_GIT_REPO_DIR:-/workspace/repos/${REMOTE_CLI_GIT_REPO_NAME}}"
 HOST_REMOTE_CLI_GIT_REPO_DIR="${HOST_REMOTE_CLI_GIT_REPO_DIR:-${HOST_WORKSPACE}/repos/${REMOTE_CLI_GIT_REPO_NAME}}"
 
@@ -343,7 +343,7 @@ else
     # Verify git history is untouched (no temp commits)
     local_head_msg=$(docker exec "$remote_cli_container" \
       git -C "$SBX_WORKTREE_DIR" log -1 --format=%s 2>/dev/null)
-    assert '[[ "$local_head_msg" != "thor-sandbox-wip" ]]' \
+    assert '[[ "$local_head_msg" != "kally-sandbox-wip" ]]' \
       "no temp commit in local history" \
       "HEAD message: '$local_head_msg'"
     # Clean up dirty file
@@ -721,7 +721,7 @@ else
   # Verify local worktree is clean (no git history manipulation)
   local_head_parallel=$(docker exec "$remote_cli_container" \
     git -C "$SBX_WORKTREE_DIR" log -1 --format=%s 2>/dev/null)
-  assert '[[ "$local_head_parallel" != "thor-sandbox-wip" ]]' \
+  assert '[[ "$local_head_parallel" != "kally-sandbox-wip" ]]' \
     "no temp commits in local history after parallel exec" \
     "HEAD message: '$local_head_parallel'"
 

@@ -3,12 +3,12 @@
 # Polyglot image with version managers: nvm (Node), SDKMAN (Java), pyenv (Python),
 # plus Docker CE for running containers (docker compose, testcontainers, etc.).
 #
-# Published to ghcr.io/scoutqa-dot-ai/thor-sandbox via .github/workflows/sandbox-e2e.yml.
+# Published to ghcr.io/scoutqa-dot-ai/kally-sandbox via .github/workflows/sandbox-e2e.yml.
 # An admin then creates a Daytona snapshot from the published image and sets
 # DAYTONA_SNAPSHOT to the snapshot name.
 #
 # Local build:
-#   docker build -t thor-sandbox docker/sandbox
+#   docker build -t kally-sandbox docker/sandbox
 
 FROM ubuntu:24.04
 
