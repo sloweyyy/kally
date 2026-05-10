@@ -93,12 +93,23 @@ export interface RemoteCliApp {
   close(): Promise<void>;
 }
 
-function thorIds(req: express.Request): { sessionId?: string; callId?: string } {
+function thorIds(req: express.Request): {
+  sessionId?: string;
+  callId?: string;
+  userSlackId?: string;
+  userEmail?: string;
+} {
   const sessionId = req.headers["x-thor-session-id"] as string | undefined;
   const callId = req.headers["x-thor-call-id"] as string | undefined;
+  // Per-user identity forwarded by the gateway. mcp-handler's checkUserAccess
+  // uses this to enforce per-proxy access policies (public/katalon/support).
+  const userSlackId = req.headers["x-kally-user-slack-id"] as string | undefined;
+  const userEmail = req.headers["x-kally-user-email"] as string | undefined;
   return {
     ...(sessionId && { sessionId }),
     ...(callId && { callId }),
+    ...(userSlackId && { userSlackId }),
+    ...(userEmail && { userEmail }),
   };
 }
 
