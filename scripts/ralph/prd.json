@@ -27,8 +27,8 @@
         "runner /health JSON: opencode==connected"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Slack app is configured with Event Subscriptions URL https://gateway-826113265397.us-central1.run.app/slack/events"
+      "passes": true,
+      "notes": "Done. Verified at 2026-05-10T13:02Z. /health: services.runner.status=ok, services.remote-cli.status=ok with mcp.connected=3 (slack/salesforce/google connected; atlassian still false — US-007). Per post-merge schema, slack-mcp now lives at services.remote-cli.mcp.instances.slack (connected:true, tools:4) instead of top-level services.slack-mcp. Runner /health: opencode=connected. gcloud logging read on revision gateway-00007-b9w showed zero ERROR entries. Slack app still points at https://gateway-826113265397.us-central1.run.app/slack/events."
     },
     {
       "id": "US-003",
