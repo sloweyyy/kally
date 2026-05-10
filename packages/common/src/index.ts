@@ -13,7 +13,9 @@ export {
   getInstallationIdForOwner,
   interpolateEnv,
   interpolateHeaders,
+  checkUserAccess,
 } from "./workspace-config.js";
+export type { AccessPolicy, AccessUser, AccessDecision } from "./workspace-config.js";
 export { PROXY_NAMES, PROXY_REGISTRY, isProxyName, getProxyConfig } from "./proxies.js";
 export {
   APPROVAL_TOOL_NAMES,
@@ -88,6 +90,15 @@ export type {
   ActiveTriggerResult,
   ReverseAnchorEntry,
 } from "./event-log.js";
+export { createVaultClient, invalidateProxyUserConnections } from "./vault-client.js";
+export type {
+  VaultClient,
+  VaultClientConfig,
+  VaultProvider,
+  VaultGetResult,
+  VaultGetResponse,
+  VaultErr,
+} from "./vault-client.js";
 export { createLogger, logInfo, logWarn, logError, truncate } from "./logger.js";
 export type { Logger } from "./logger.js";
 export { errorToMetadata } from "./errors.js";
