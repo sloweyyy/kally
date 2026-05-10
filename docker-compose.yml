@@ -1,4 +1,4 @@
-# Kally — Docker Compose
+# Thor — Docker Compose
 #
 # Start:   docker compose up --build -d
 # Test:    ./scripts/test-e2e.sh
@@ -6,6 +6,284 @@
 # Stop:    docker compose down
 
 services:
+  remote-cli:
+    build:
+      context: .
+      target: remote-cli
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3004:3004"
+    environment:
+      - NODE_ENV=production
+      - GITHUB_PAT=${GITHUB_PAT:-}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:?set GITHUB_APP_ID}
+      - GITHUB_APP_SLUG=${GITHUB_APP_SLUG:?set GITHUB_APP_SLUG}
+      - GITHUB_APP_BOT_ID=${GITHUB_APP_BOT_ID:?set GITHUB_APP_BOT_ID}
+      - GITHUB_APP_PRIVATE_KEY_FILE=${GITHUB_APP_PRIVATE_KEY_FILE:?set GITHUB_APP_PRIVATE_KEY_FILE}
+      - GITHUB_API_URL=${GITHUB_API_URL:-}
+      - ATLASSIAN_AUTH=${ATLASSIAN_AUTH}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:?set SLACK_BOT_TOKEN}
+      - POSTHOG_API_KEY=${POSTHOG_API_KEY}
+      - THOR_INTERNAL_SECRET=${THOR_INTERNAL_SECRET:?set THOR_INTERNAL_SECRET}
+      - SCOUT_API_KEY=${SCOUT_API_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
+      - LD_ACCESS_TOKEN=${LD_ACCESS_TOKEN:-}
+      - LD_BASE_URI=${LD_BASE_URI:-}
+      - LD_PROJECT=${LD_PROJECT:-}
+      - LD_ENVIRONMENT=${LD_ENVIRONMENT:-}
+      - METABASE_URL=${METABASE_URL:-}
+      - METABASE_API_KEY=${METABASE_API_KEY:-}
+      - METABASE_DATABASE_ID=${METABASE_DATABASE_ID:-}
+      - METABASE_ALLOWED_SCHEMAS=${METABASE_ALLOWED_SCHEMAS:-}
+      - DAYTONA_API_KEY=${DAYTONA_API_KEY:-}
+      - DAYTONA_API_URL=${DAYTONA_API_URL:-https://app.daytona.io/api}
+      - DAYTONA_SNAPSHOT=${DAYTONA_SNAPSHOT:-}
+      - RUNNER_BASE_URL=${RUNNER_BASE_URL:?set RUNNER_BASE_URL}
+    volumes:
+      - ./docker-volumes/home/thor:/home/thor
+      - ./docker-volumes/workspace:/workspace
+      - ./docker-volumes/github-app:/var/lib/remote-cli/github-app
+      - shared-tmp:/tmp
+    depends_on:
+      grafana-mcp:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  grafana-mcp:
+    image: grafana/mcp-grafana:0.12.0
+    restart: unless-stopped
+    entrypoint:
+      [
+        "/app/mcp-grafana",
+        "-transport",
+        "streamable-http",
+        "-address",
+        "0.0.0.0:8000",
+        "-enabled-tools",
+        "datasource,loki,proxied",
+      ]
+    environment:
+      - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
+      - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
+      - GRAFANA_ORG_ID=${GRAFANA_ORG_ID:-1}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+      start_interval: 2s
+
+  mitmproxy:
+    build:
+      context: .
+      target: mitmproxy
+    restart: unless-stopped
+    environment:
+      - ATLASSIAN_AUTH=${ATLASSIAN_AUTH:-}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+    ports:
+      - "127.0.0.1:3080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./docker-volumes/workspace:/workspace:ro
+      - ./docker-volumes/mitmproxy:/etc/thor/mitmproxy:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({'http':'http://localhost:8080'})); r=opener.open('http://__health.thor/', timeout=2); sys.exit(0 if r.status == 200 else 1)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  opencode:
+    build:
+      context: .
+      target: opencode
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4096:4096"
+    working_dir: /workspace
+    command: ["serve", "--port", "4096", "--hostname", "0.0.0.0"]
+    environment:
+      - http_proxy=http://mitmproxy:8080
+      - https_proxy=http://mitmproxy:8080
+      - no_proxy=localhost,127.0.0.1,::1,remote-cli,gateway,runner,grafana-mcp,opencode,admin,ingress,vouch,cron,mitmproxy
+      - HTTP_PROXY=http://mitmproxy:8080
+      - HTTPS_PROXY=http://mitmproxy:8080
+      - NO_PROXY=localhost,127.0.0.1,::1,remote-cli,gateway,runner,grafana-mcp,opencode,admin,ingress,vouch,cron,mitmproxy
+      - NODE_OPTIONS=--use-env-proxy --disable-warning=UNDICI-EHPA
+      - NODE_EXTRA_CA_CERTS=/etc/thor/mitmproxy-public/mitmproxy-ca.pem
+      - CURL_CA_BUNDLE=/etc/thor/mitmproxy-public/mitmproxy-ca.pem
+      - SSL_CERT_FILE=/etc/thor/mitmproxy-public/mitmproxy-ca.pem
+    volumes:
+      - ./docker-volumes/opencode:/home/thor/.local/share/opencode
+      - ./docker-volumes/workspace/memory:/workspace/memory
+      - ./docker-volumes/workspace/config.json:/workspace/config.json:ro
+      - ./docker-volumes/workspace/repos:/workspace/repos:ro
+      - ./docker-volumes/workspace/worklog:/workspace/worklog:ro
+      - ./docker-volumes/workspace/cron:/workspace/cron
+      - ./docker-volumes/workspace/runs:/workspace/runs
+      - ./docker-volumes/workspace/worktrees:/workspace/worktrees
+      - ./docker-volumes/mitmproxy/public:/etc/thor/mitmproxy-public:ro
+      - shared-tmp:/tmp
+    depends_on:
+      remote-cli:
+        condition: service_healthy
+      mitmproxy:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4096/global/health').then(r=>{if(!r.ok)throw 1})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  runner:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - NODE_ENV=production
+      - OPENCODE_URL=http://opencode:4096
+      - THOR_INTERNAL_SECRET=${THOR_INTERNAL_SECRET:?set THOR_INTERNAL_SECRET}
+      - THOR_E2E_TEST_HELPERS=${THOR_E2E_TEST_HELPERS:-}
+      - SESSION_LOG_MAX_BYTES=${SESSION_LOG_MAX_BYTES:-}
+    volumes:
+      - ./docker-volumes/workspace:/workspace
+    depends_on:
+      opencode:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: .
+      target: gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3002"
+    environment:
+      - NODE_ENV=production
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:?set SLACK_BOT_TOKEN}
+      - SLACK_BOT_USER_ID=${SLACK_BOT_USER_ID:?set SLACK_BOT_USER_ID}
+      - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
+      - GITHUB_APP_SLUG=${GITHUB_APP_SLUG:?set GITHUB_APP_SLUG}
+      - GITHUB_APP_BOT_ID=${GITHUB_APP_BOT_ID:?set GITHUB_APP_BOT_ID}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?set GITHUB_WEBHOOK_SECRET}
+      - OPENAI_AUTH_PATH=/opencode/auth.json
+      - REMOTE_CLI_HOST=remote-cli
+      - REMOTE_CLI_PORT=3004
+      - THOR_INTERNAL_SECRET=${THOR_INTERNAL_SECRET:?set THOR_INTERNAL_SECRET}
+    volumes:
+      - ./docker-volumes/workspace:/workspace
+      - ./docker-volumes/opencode:/opencode:ro
+    depends_on:
+      runner:
+        condition: service_started
+      remote-cli:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cron:
+    build:
+      context: ./docker/cron
+    restart: unless-stopped
+    environment:
+      - GATEWAY_URL=http://gateway:3002
+      - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
+    volumes:
+      - ./docker-volumes/workspace/cron:/workspace/cron:ro
+      - ./docker-volumes/workspace/repos:/workspace/repos:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: .
+      target: admin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3005:3005"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./docker-volumes/workspace:/workspace
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://localhost:3005/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  vouch:
+    image: quay.io/vouch/vouch-proxy:0.45.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    environment:
+      - OAUTH_CALLBACK_URL=${VOUCH_CALLBACK_URL:-http://localhost:8080/vouch/auth}
+      - OAUTH_CLIENT_ID=${VOUCH_GOOGLE_CLIENT_ID:?set VOUCH_GOOGLE_CLIENT_ID}
+      - OAUTH_CLIENT_SECRET=${VOUCH_GOOGLE_CLIENT_SECRET:?set VOUCH_GOOGLE_CLIENT_SECRET}
+      - OAUTH_PROVIDER=google
+      - OAUTH_SCOPES=openid,email,profile
+      - VOUCH_COOKIE_DOMAIN=${VOUCH_COOKIE_DOMAIN:-localhost}
+      - VOUCH_COOKIE_MAXAGE=4320
+      - VOUCH_COOKIE_SECURE=false
+      - VOUCH_DOCUMENT_ROOT=/vouch
+      - VOUCH_DOMAINS=vouch
+      - VOUCH_JWT_MAXAGE=4320
+      - VOUCH_JWT_SECRET=${VOUCH_JWT_SECRET:?set VOUCH_JWT_SECRET}
+      - VOUCH_WHITELIST=${VOUCH_WHITELIST:?set VOUCH_WHITELIST}
+      - VOUCH_LOGLEVEL=error
+    healthcheck:
+      test: ["CMD", "/vouch-proxy", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ingress:
+    build:
+      context: ./docker/ingress
+    restart: unless-stopped
+    ports:
+      - "${INGRESS_PORT:-8080}:8080"
+    depends_on:
+      gateway:
+        condition: service_healthy
+      opencode:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+      vouch:
+        condition: service_healthy
+
   slack-mcp:
     build:
       context: .
@@ -66,82 +344,6 @@ services:
       timeout: 3s
       retries: 10
 
-  remote-cli:
-    build:
-      context: .
-      target: remote-cli
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3004:3004"
-    environment:
-      - NODE_ENV=production
-      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-thor@localhost}
-      - GIT_USER_NAME=${GIT_USER_NAME:-thor}
-      - GITHUB_PAT=${GITHUB_PAT:-}
-      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
-      - GITHUB_APP_PRIVATE_KEY_FILE=${GITHUB_APP_PRIVATE_KEY_FILE:-}
-      - GITHUB_API_URL=${GITHUB_API_URL:-}
-      - ATLASSIAN_AUTH=${ATLASSIAN_AUTH}
-      - POSTHOG_API_KEY=${POSTHOG_API_KEY}
-      - RESOLVE_SECRET=${RESOLVE_SECRET:?set RESOLVE_SECRET}
-      - SCOUT_API_KEY=${SCOUT_API_KEY:-}
-      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
-      - METABASE_URL=${METABASE_URL:-}
-      - METABASE_API_KEY=${METABASE_API_KEY:-}
-      - METABASE_DATABASE_ID=${METABASE_DATABASE_ID:-}
-      - METABASE_ALLOWED_SCHEMAS=${METABASE_ALLOWED_SCHEMAS:-}
-    volumes:
-      - ./docker-volumes/home/kally:/home/kally
-      - ./docker-volumes/workspace:/workspace
-      - ./docker-volumes/github-app:/var/lib/remote-cli/github-app
-    depends_on:
-      slack-mcp:
-        condition: service_healthy
-      salesforce-mcp:
-        condition: service_healthy
-      google-mcp:
-        condition: service_healthy
-      # grafana-mcp disabled for local dev
-      # grafana-mcp:
-      #   condition: service_healthy
-    healthcheck:
-      test:
-        ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>{if(!r.ok)throw 1})"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # grafana-mcp disabled for local dev — re-enable when GRAFANA_URL + token are real.
-  # grafana-mcp:
-  #   image: grafana/mcp-grafana:0.11.3
-  #   restart: unless-stopped
-  #   entrypoint:
-  #     [
-  #       "/app/mcp-grafana",
-  #       "-transport",
-  #       "streamable-http",
-  #       "-address",
-  #       "0.0.0.0:8000",
-  #       "-enabled-tools",
-  #       "datasource,loki,proxied",
-  #     ]
-  #   environment:
-  #     - GRAFANA_URL=${GRAFANA_URL:?set GRAFANA_URL}
-  #     - GRAFANA_SERVICE_ACCOUNT_TOKEN=${GRAFANA_SERVICE_ACCOUNT_TOKEN:?set GRAFANA_SERVICE_ACCOUNT_TOKEN}
-  #   healthcheck:
-  #     test:
-  #       [
-  #         "CMD",
-  #         "bash",
-  #         "-c",
-  #         "echo -e 'GET /mcp HTTP/1.1\r\nHost: localhost\r\n\r\n' > /dev/tcp/localhost/8000",
-  #       ]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 10
-
   vault:
     build:
       context: .
@@ -165,193 +367,5 @@ services:
       timeout: 3s
       retries: 10
 
-  data:
-    build:
-      context: ./docker/data
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3080:80"
-    env_file:
-      - .env
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  opencode:
-    build:
-      context: .
-      target: opencode
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: ${OPENCODE_MEMORY_LIMIT:-4g}
-          cpus: "${OPENCODE_CPU_LIMIT:-3}"
-    ports:
-      - "127.0.0.1:4096:4096"
-    working_dir: /workspace
-    command: ["serve", "--port", "4096", "--hostname", "0.0.0.0"]
-    volumes:
-      - ./docker-volumes/opencode:/home/thor/.local/share/opencode
-      - ./docker-volumes/workspace/memory:/workspace/memory
-      - ./docker-volumes/workspace/repos:/workspace/repos:ro
-      - ./docker-volumes/workspace/worklog:/workspace/worklog:ro
-      - ./docker-volumes/workspace/cron:/workspace/cron
-      - ./docker-volumes/workspace/worktrees:/workspace/worktrees
-      # Share host opencode auth (all providers: anthropic, openai, codex, google, etc.)
-      - ${HOME}/.local/share/opencode/auth.json:/home/thor/.local/share/opencode/auth.json
-    depends_on:
-      remote-cli:
-        condition: service_healthy
-      data:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:4096/global/health').then(r=>{if(!r.ok)throw 1})",
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  runner:
-    build:
-      context: .
-      target: runner
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      - NODE_ENV=production
-      - OPENCODE_URL=http://opencode:4096
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
-      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
-      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
-    volumes:
-      - ./docker-volumes/workspace:/workspace
-    depends_on:
-      opencode:
-        condition: service_healthy
-
-  gateway:
-    build:
-      context: .
-      target: gateway
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3002:3002"
-    environment:
-      - NODE_ENV=production
-      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
-      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
-      - SLACK_BOT_USER_ID=${SLACK_BOT_USER_ID:?set SLACK_BOT_USER_ID}
-      - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
-      - OPENAI_AUTH_PATH=/opencode/auth.json
-      - REMOTE_CLI_HOST=remote-cli
-      - REMOTE_CLI_PORT=3004
-      - RESOLVE_SECRET=${RESOLVE_SECRET:?set RESOLVE_SECRET}
-      - KALLY_VAULT_URL=http://vault:3006
-      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:-}
-    volumes:
-      - ./docker-volumes/workspace:/workspace
-      - ./docker-volumes/opencode:/opencode:ro
-    depends_on:
-      runner:
-        condition: service_started
-      slack-mcp:
-        condition: service_healthy
-      remote-cli:
-        condition: service_healthy
-    healthcheck:
-      test:
-        ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>{if(!r.ok)throw 1})"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  cron:
-    build:
-      context: ./docker/cron
-    restart: unless-stopped
-    environment:
-      - GATEWAY_URL=http://gateway:3002
-      - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET}
-    volumes:
-      - ./docker-volumes/workspace/cron:/workspace/cron:ro
-      - ./docker-volumes/workspace/repos:/workspace/repos:ro
-    depends_on:
-      gateway:
-        condition: service_healthy
-
-  dashboard:
-    image: node:22-slim
-    restart: unless-stopped
-    working_dir: /app
-    # Dev mode: mount source + node_modules, run `next dev`.
-    # For production: build a proper Dockerfile target with `next build` + `next start`.
-    command:
-      [
-        "sh",
-        "-c",
-        "npm install --prefer-offline 2>/dev/null; npx next dev --port 3007 --hostname 0.0.0.0",
-      ]
-    ports:
-      - "127.0.0.1:3007:3007"
-    environment:
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
-      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-kally}
-      - LANGSMITH_ENDPOINT=${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
-      - VAULT_FILE_PATH=/workspace/vault/kally.json
-      - VAULT_AUDIT_PATH=/workspace/vault/audit.jsonl
-    volumes:
-      - ./packages/dashboard:/app
-      - ./docker-volumes/workspace/vault:/workspace/vault:ro
-      - ./docker-volumes/workspace/config.json:/workspace/config.json:ro
-    depends_on:
-      gateway:
-        condition: service_healthy
-
-  vouch:
-    image: quay.io/vouch/vouch-proxy:0.45.1
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:9090:9090"
-    environment:
-      - OAUTH_CALLBACK_URL=${VOUCH_CALLBACK_URL:-http://localhost:8080/vouch/auth}
-      - OAUTH_CLIENT_ID=${VOUCH_GOOGLE_CLIENT_ID:?set VOUCH_GOOGLE_CLIENT_ID}
-      - OAUTH_CLIENT_SECRET=${VOUCH_GOOGLE_CLIENT_SECRET:?set VOUCH_GOOGLE_CLIENT_SECRET}
-      - OAUTH_PROVIDER=google
-      - OAUTH_SCOPES=openid,email,profile
-      - VOUCH_COOKIE_DOMAIN=${VOUCH_COOKIE_DOMAIN:-localhost}
-      - VOUCH_COOKIE_MAXAGE=4320
-      - VOUCH_COOKIE_SECURE=false
-      - VOUCH_DOCUMENT_ROOT=/vouch
-      - VOUCH_DOMAINS=vouch
-      - VOUCH_JWT_MAXAGE=4320
-      - VOUCH_JWT_SECRET=${VOUCH_JWT_SECRET:?set VOUCH_JWT_SECRET}
-      - VOUCH_WHITELIST=${VOUCH_WHITELIST:?set VOUCH_WHITELIST}
-      - VOUCH_LOGLEVEL=error
-    healthcheck:
-      test: ["CMD", "/vouch-proxy", "-healthcheck"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  ingress:
-    build:
-      context: ./docker/ingress
-    restart: unless-stopped
-    ports:
-      - "${INGRESS_PORT:-8080}:8080"
-    depends_on:
-      gateway:
-        condition: service_healthy
-      opencode:
-        condition: service_healthy
-      vouch:
-        condition: service_healthy
+volumes:
+  shared-tmp:

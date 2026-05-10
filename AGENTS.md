@@ -4,40 +4,59 @@ Instructions for AI agents working on this repository.
 
 ## Workflow
 
-1. **Plan before code** — Every feature or PoC starts with a plan document in `docs/plan/`. Format: `YYYYMMDDNN_<slug>.md`. The plan contains phases, decision log, exit criteria, and out-of-scope items.
+1. **Plan before code when warranted** — New features or PoCs should start with a plan document in `docs/plan/`. Format: `YYYYMMDDNN_<slug>.md`. The plan contains phases, decision log, exit criteria, and out-of-scope items.
+   - Bug fixes or isolated changes on top of an existing plan should append to that existing plan instead of creating a new one.
+   - Small, focused feature adjustments can skip a new plan file when the scope is obvious and contained.
 
 2. **Phase-based implementation** — Work proceeds one phase at a time:
    - Implement the phase
-   - Self-test against the exit criteria defined in the plan
-   - Stop and wait for human review
-   - Human approves -> create a focused git commit for that phase
-   - Proceed to next phase
+   - Run self-tests against the phase exit criteria using unit tests or other isolated local verification
+   - Proceed to the next phase once the phase passes isolated validation locally
 
-3. **Commit discipline**:
+3. **Integration verification** — After all phases are complete:
+   - Push the branch to GitHub to trigger the relevant E2E or integration workflow
+   - If the required workflow does not trigger automatically, dispatch it manually
+   - Choose the workflow to run based on the scope of the change
+   - Use the GitHub workflow result as the final verification gate
+   - Once the required push checks are green, open a PR against the appropriate base branch
+
+4. **Commit discipline**:
    - One commit per phase (not per file, not per feature)
    - Commit message format: `<type>: <short description>` (e.g. `feat: add mcp approval flow`, `chore: project init`)
    - Never commit secrets, `.env` files, or `node_modules`
-   - Never push unless explicitly asked
+   - Push after all phases are complete so GitHub workflows can verify the full change
+   - Create the PR only after the required push checks pass
 
-4. **Document decisions** — When making a non-obvious choice (library, pattern, architecture), add it to the plan's Decision Log table. Future sessions can read this to understand why things are the way they are.
+5. **Document decisions** — When making a non-obvious choice (library, pattern, architecture), add it to the active plan's Decision Log table. Future sessions can read this to understand why things are the way they are.
+
+6. **Environment variable discipline** — When adding, renaming, or removing an environment variable, update every required surface in the same change: `docker-compose.yml`, `.env.example`, `README.md` Deployment Configuration, relevant GitHub workflow env blocks, tests/fixtures, and any active plan docs. Do not leave required env vars documented only in code or compose.
+
+7. **Behavior-focused tests** — Prefer tests that prove user-visible behavior, safety boundaries, integration contracts, and non-obvious fail-fast paths. Avoid tests that only lock obvious string construction, env-var trimming/default wrappers, one-line pass-through helpers, or other implementation details unless that exact output is a meaningful product/API contract. If the code is straightforward and already covered through a higher-level behavior test, prefer no direct unit test over low-value coverage.
+
+8. **Rate limiting** — App-level rate limiters / DDoS protection are deferred to infrastructure (ingress, proxy, WAF, or platform controls). CodeQL missing-rate-limit alerts are acknowledged, but do not add Express middleware limiters unless a future plan explicitly changes this policy.
 
 ## Repository Structure
 
 ```
 kally/
 ├── AGENTS.md                  # This file
+├── CLAUDE.md                  # Claude Code guidance
+├── docker/                    # Container definitions and service configs
+├── docker-volumes/            # Local mounted data for dockerized services
 ├── docs/
 │   ├── feat/                  # Feature specs and architecture
 │   └── plan/                  # Implementation plans
 ├── packages/
+│   ├── admin/                 # Admin web UI
 │   ├── common/                # Shared config, logging, notes, schemas
 │   ├── gateway/               # Inbound webhook gateway (Slack, etc.)
+│   ├── opencode-cli/          # OpenCode helper wrappers for remote-cli
 │   ├── remote-cli/            # CLI + MCP policy gateway
-│   ├── runner/                # Agent runner + trigger endpoint
-│   └── slack-mcp/             # Slack MCP server + progress updates
+│   └── runner/                # Agent runner + trigger endpoint
 ├── scripts/                   # Test and utility scripts
 ├── docker-compose.yml
 ├── package.json               # pnpm workspace root
+├── pnpm-workspace.yaml
 └── tsconfig.base.json         # Shared TypeScript config
 ```
 
@@ -47,6 +66,7 @@ kally/
 - **Package manager**: pnpm with workspaces
 - **Runtime**: Node.js 22+
 - **Formatting**: Default TypeScript/ESLint conventions. No custom config until needed.
+- **OpenCode version alignment**: When bumping `@opencode-ai/sdk`, also bump the OpenCode server/package version in the Dockerfile in the same change so the client and server stay aligned.
 - **No frameworks unless justified** — Express for HTTP, raw TypeScript for everything else. Every added dependency should have a reason in the plan.
 
 ## Context for New Sessions
@@ -57,4 +77,4 @@ When starting a new session on this repo:
 2. Read the latest plan in `docs/plan/` for current work context
 3. Read `docs/feat/mvp.md` for the overall architecture
 4. Check `git log --oneline -10` for recent progress
-5. Check for any TODO comments in code for incomplete work
+5. Check for `TODO` / `FIXME` comments in `packages/` and `scripts/` for incomplete work
