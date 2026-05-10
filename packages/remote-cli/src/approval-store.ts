@@ -1,30 +1,33 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ExecResultSchema, type ExecResult } from "@kally/common";
 import { z } from "zod/v4";
 
-const ApprovalActionSchema = z.object({
-  id: z.string(),
-  upstream: z.string(),
-  status: z.enum(["pending", "approved", "rejected"]),
-  tool: z.string(),
-  args: z.record(z.string(), z.unknown()),
-  createdAt: z.string(),
-  dateSegment: z.string(),
-  /** Slack user id of the person whose action triggered this approval.
-   *  Used at resolve-time to look up per-user creds from the vault so the
-   *  approved action authenticates AS THAT USER, not as the reviewer and
-   *  not as the container's service account. Optional for backwards
-   *  compatibility with legacy pending approvals that predate Phase 3. */
-  requester_uid: z.string().optional(),
-  /** Email of the requester, carried for audit + user-facing messages. */
-  requester_email: z.string().optional(),
-  resolvedAt: z.string().optional(),
-  reviewer: z.string().optional(),
-  result: z.any().optional(),
-  error: z.string().optional(),
-  reason: z.string().optional(),
-});
+const ApprovalActionSchema = z
+  .object({
+    id: z.string(),
+    upstream: z.string(),
+    status: z.enum(["pending", "approved", "rejected"]),
+    tool: z.string(),
+    args: z.record(z.string(), z.unknown()),
+    createdAt: z.string(),
+    dateSegment: z.string(),
+    resolvedAt: z.string().optional(),
+    reviewer: z.string().optional(),
+    result: ExecResultSchema.optional(),
+    error: z.string().optional(),
+    reason: z.string().optional(),
+  })
+  .superRefine((action, ctx) => {
+    if (action.status === "approved" && !action.result) {
+      ctx.addIssue({
+        code: "custom",
+        message: "approved approval actions must include a valid ExecResult result",
+        path: ["result"],
+      });
+    }
+  });
 
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ApprovalAction = z.infer<typeof ApprovalActionSchema>;
@@ -35,17 +38,7 @@ export class ApprovalStore {
     private readonly upstream: string,
   ) {}
 
-  /** Create a pending approval action. Returns the action.
-   *
-   *  `requester` carries the Slack identity of the person whose intent the
-   *  action represents. At resolve time, the proxy fetches this user's vault
-   *  creds so the approved call authenticates AS THEM — not as the reviewer
-   *  and not as the container's shared creds. */
-  create(
-    tool: string,
-    args: Record<string, unknown>,
-    requester?: { uid?: string; email?: string },
-  ): ApprovalAction {
+  create(tool: string, args: Record<string, unknown>): ApprovalAction {
     const now = new Date();
     const action: ApprovalAction = {
       id: randomUUID(),
@@ -55,8 +48,6 @@ export class ApprovalStore {
       args,
       createdAt: now.toISOString(),
       dateSegment: now.toISOString().slice(0, 10),
-      ...(requester?.uid ? { requester_uid: requester.uid } : {}),
-      ...(requester?.email ? { requester_email: requester.email } : {}),
     };
     this.write(action);
     return action;
@@ -77,26 +68,33 @@ export class ApprovalStore {
     this.write(action);
   }
 
-  resolve(
-    id: string,
-    decision: "approved" | "rejected",
-    reviewer?: string,
-    reason?: string,
-  ): ApprovalAction | undefined {
+  reject(id: string, reviewer?: string, reason?: string): ApprovalAction | undefined {
     const action = this.get(id);
     if (!action || action.status !== "pending") return undefined;
-    return this.resolveLoaded(action, decision, reviewer, reason);
+    return this.rejectLoaded(action, reviewer, reason);
   }
 
-  resolveLoaded(
+  rejectLoaded(action: ApprovalAction, reviewer?: string, reason?: string): ApprovalAction {
+    action.status = "rejected";
+    action.resolvedAt = new Date().toISOString();
+    action.reviewer = reviewer;
+    if (reason) action.reason = reason;
+
+    this.write(action);
+    return action;
+  }
+
+  approveLoaded(
     action: ApprovalAction,
-    decision: "approved" | "rejected",
+    result: ExecResult,
     reviewer?: string,
     reason?: string,
   ): ApprovalAction {
-    action.status = decision;
+    action.status = "approved";
     action.resolvedAt = new Date().toISOString();
     action.reviewer = reviewer;
+    action.result = ExecResultSchema.parse(result);
+    delete action.error;
     if (reason) action.reason = reason;
 
     this.write(action);

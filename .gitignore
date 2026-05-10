@@ -21,8 +21,9 @@ test.sh
 .idea/
 .vscode/
 
-# Kally
+# Thor
 /docker-volumes/
 
-# Claude Code local settings (per-machine)
-.claude/
+# Python
+__pycache__/
+*.pyc
