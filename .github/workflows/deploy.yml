@@ -1,0 +1,135 @@
+name: Deploy to Cloud Run
+
+# Triggers a Cloud Build that produces service images, then rolls each
+# Cloud Run service forward to the new image. Auto-runs on push to main
+# when source/Dockerfile changes; manual trigger lets you redeploy
+# selectively without a code change.
+#
+# Auth: Workload Identity Federation (no JSON key in the repo). One-time
+# setup commands are documented in docs/cicd-setup.md — search there if
+# this workflow fails with `Permission 'iam.serviceAccounts.getAccessToken'
+# denied`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "Dockerfile"
+      - "cloudbuild*.yaml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated services to deploy (default: all). Options: gateway,runner,slack-mcp,vault,salesforce-mcp,google-mcp,remote-cli,opencode-sidecar"
+        required: false
+        default: "all"
+      skip_build:
+        description: "Skip Cloud Build (deploy existing :latest tags only)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # required for Workload Identity Federation
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT: kally-lab-a8e32b
+  GCP_REGION: us-central1
+  AR_REPO: us-central1-docker.pkg.dev/kally-lab-a8e32b/kally
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+
+      # ── Build phase ────────────────────────────────────────────────
+      # Each cloudbuild*.yaml builds against $PROJECT_ID and publishes to
+      # the Artifact Registry repo declared in env above.
+
+      - name: Build all service images
+        if: ${{ inputs.skip_build != true }}
+        run: |
+          set -euo pipefail
+          gcloud builds submit --config=cloudbuild.yaml --substitutions=_PROJECT_ID=${{ env.GCP_PROJECT }} .
+
+      - name: Build opencode sidecar image
+        if: ${{ inputs.skip_build != true }}
+        run: |
+          set -euo pipefail
+          gcloud builds submit --config=cloudbuild-opencode.yaml --substitutions=_PROJECT_ID=${{ env.GCP_PROJECT }} .
+
+      # ── Deploy phase ───────────────────────────────────────────────
+      # Single-container services updated via `services update --image=...`.
+      # The runner service has a multi-container spec (runner + opencode
+      # sidecar) and must be applied via `services replace runner.yaml`
+      # because `services update --image` only supports single-container.
+
+      - name: Deploy single-container services
+        run: |
+          set -euo pipefail
+          requested="${{ inputs.services || 'all' }}"
+          if [[ "$requested" == "all" ]]; then
+            services="gateway slack-mcp vault salesforce-mcp google-mcp remote-cli"
+          else
+            services=$(echo "$requested" | tr ',' ' ')
+          fi
+          for svc in $services; do
+            case "$svc" in
+              runner|opencode-sidecar) continue ;;  # handled by replace step
+              all) continue ;;
+            esac
+            echo "── Deploying $svc ──"
+            gcloud run services update "$svc" \
+              --region="${{ env.GCP_REGION }}" \
+              --image="${{ env.AR_REPO }}/$svc:latest" \
+              --quiet
+          done
+
+      - name: Deploy runner (multi-container with opencode sidecar)
+        if: ${{ inputs.services == 'all' || contains(inputs.services, 'runner') || inputs.services == '' }}
+        run: |
+          set -euo pipefail
+          pip3 install --quiet PyYAML
+          gcloud run services describe runner --region="${{ env.GCP_REGION }}" --format=export > /tmp/runner-current.yaml
+          python3 scripts/deploy/render-runner-yaml.py \
+            --runner-image "${{ env.AR_REPO }}/runner:latest" \
+            --opencode-image "${{ env.AR_REPO }}/opencode:latest" \
+            < /tmp/runner-current.yaml > /tmp/runner-next.yaml
+          gcloud run services replace /tmp/runner-next.yaml --region="${{ env.GCP_REGION }}" --quiet
+
+      - name: Smoke-test gateway /health
+        run: |
+          set -euo pipefail
+          url="https://gateway-826113265397.${{ env.GCP_REGION }}.run.app/health"
+          echo "GET $url"
+          for i in 1 2 3 4 5; do
+            status=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$url" || echo 000)
+            echo "  attempt $i: HTTP $status"
+            if [[ "$status" == "200" ]]; then
+              cat /tmp/health.json | python3 -m json.tool
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "Gateway /health did not return 200 after 5 attempts"
+          exit 1
