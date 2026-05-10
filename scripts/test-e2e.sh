@@ -307,7 +307,11 @@ else
 fi
 
 if [[ -z "$APPROVAL_TOOL" ]]; then
-  assert 'false' "approval flow: discovered an approval-required tool" "${APPROVAL_DISCOVERY_DEBUG:-approval tool discovery returned no match}"
+  if [[ "${E2E_ALLOW_SKIP_APPROVAL_FLOW:-0}" == "1" ]]; then
+    echo "  ⊘ approval flow skipped: ${APPROVAL_DISCOVERY_DEBUG:-no approval-capable MCP upstream connected (fork without credentials)}"
+  else
+    assert 'false' "approval flow: discovered an approval-required tool" "${APPROVAL_DISCOVERY_DEBUG:-approval tool discovery returned no match}"
+  fi
 elif [[ -z "$THOR_INTERNAL_SECRET" ]]; then
   assert 'false' "approval flow: THOR_INTERNAL_SECRET is available" "Set THOR_INTERNAL_SECRET or ensure docker exec thor-gateway-1 printenv THOR_INTERNAL_SECRET returns a value"
 else
