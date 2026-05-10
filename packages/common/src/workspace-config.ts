@@ -147,7 +147,7 @@ export function checkUserAccess(
       message:
         `Salesforce tools are restricted to the Product Support team. ` +
         `Your account (${user.user_email}) isn't on the team list. ` +
-        "Ping <@TEAMLEAD_UID> if you think this is wrong.",
+        "Ping the team lead if you think this is wrong.",
     };
   }
   return { ok: true };
