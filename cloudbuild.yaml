@@ -3,9 +3,14 @@ options:
   machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY
 
+# Each step gets DOCKER_BUILDKIT=1 in per-step env (not options.env, which
+# doesn't propagate to gcr.io/cloud-builders/docker). The Dockerfile uses
+# RUN --mount=type=cache,... and per-package build stages that require BuildKit.
+
 steps:
   - name: gcr.io/cloud-builders/docker
     id: build-gateway
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -17,6 +22,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-runner
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -28,6 +34,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-slack
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -39,6 +46,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-vault
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -50,6 +58,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-salesforce
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -61,6 +70,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-google
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
@@ -72,6 +82,7 @@ steps:
       ]
   - name: gcr.io/cloud-builders/docker
     id: build-remote-cli
+    env: ["DOCKER_BUILDKIT=1"]
     args:
       [
         "build",
