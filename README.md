@@ -16,13 +16,19 @@
 
 ## Why this exists
 
-You mention `@Kally` in Slack. It triages your Salesforce queue, escalates to Jira, drafts the Confluence KB article, runs a SOQL query, scans a 50 MB log bundle for known signatures — anything an LLM with the right tools can do. Every write goes through an in-channel approval card. Every action authenticates as **you**, not a shared service account, even if the reviewer was someone else. Every credential is encrypted at rest and revocable with one slash command.
+You mention `@Kally` in Slack. It triages your Salesforce queue, escalates to Jira, drafts the Confluence KB article, runs a SOQL query, scans a 50 MB log bundle for known signatures, **opens a PR worktree to review code, replies inline on review threads, watches CI on commits it authored, and fixes its own failures** — anything an LLM with the right tools can do. Every write goes through an in-channel approval card. Every action authenticates as **you**, not a shared service account, even if the reviewer was someone else. Every credential is encrypted at rest and revocable with one slash command.
 
 ```
+# Slack surface
 @Kally triage my open cases
 @Kally create a KSR for SF00046518
 @Kally analyze the log on SF00046155
 @Kally write a KB from SF00045276
+
+# GitHub surface
+"@Kally please review"     ← inline PR comment, Kally checks out a worktree and replies
+push to a tracked branch   ← worktree fast-forwarded or hard-reset by classification
+CI failed on Kally's commit ← pulls failed logs, fixes, pushes, lets next CI verify
 ```
 
 ## Architecture
@@ -139,6 +145,65 @@ User identity, repo, agent, model, channel — all attached as searchable metada
 ### Multimodal file handling on Slack
 
 `get_slack_file` returns a tagged union: `image` (vision content), `text` (raw), `pdf` (extracted text), `zip` (manifest with small text entries inlined). Default 5 MB cap, hard cap 50 MB. The agent sees a 32 MB log bundle as a structured document, not a base64 wall.
+
+### GitHub events that wake the agent (six types, each with its own gate)
+
+The gateway pre-filters webhooks before waking opencode. Each event type carries its own short-circuit logic so the agent only resumes for things it actually needs to act on:
+
+| Event | What the gateway does | What Kally does on wake |
+|---|---|---|
+| `issue_comment.created` | Mention-gate; ignore PR-bot comments | Replies in-thread via `gh pr comment <N>` |
+| `pull_request_review_comment.created` | Inline review comment on a tracked PR | Replies on the same thread via `gh api ... in_reply_to=<id>` (not a new top-level comment) |
+| `pull_request_review.submitted` | Full review with non-empty body | Reads `review.state` (approved / changes_requested / commented), addresses inline specifics |
+| `push` | Compares local HEAD to `event.after`; fast-forward vs divergent classified via `git merge-base --is-ancestor`. Worktree hard-reset to FETCH_HEAD, divergent pushes flagged as **interrupts** | Re-reads HEAD if interrupt, otherwise continues |
+| `check_suite.completed` | Bot-authored CI gate | Per-conclusion handling: `success` = log only; `failure` = pull failed logs, classify defect vs flake, fix and push (max 3 autonomous attempts/branch), or escalate to Slack thread |
+| `pull_request.closed` | Tracks `pull_request.merged` flag | Stops pushing to merged branch; records outcome |
+
+Same-correlation-key events get debounced over 3 s, so a Slack-style submitted-review-with-inline-comments arrives as one logical message.
+
+### PR review protocol that doesn't fake context
+
+When Kally is asked to review a PR, the **first action** is always to check out the branch to a real worktree:
+
+```bash
+git fetch origin pull/<N>/head:pr-<N>
+git worktree add /workspace/worktrees/<repo>/pr-<N> pr-<N>
+```
+
+Then every diff, grep, test, type-check, and file read happens against the worktree. Reviewing via `gh pr diff` alone is forbidden — it produces shallow reviews because you can't run the test suite, can't grep beyond changed lines for callers, and can't reproduce the build. If a worktree already exists at `/workspace/worktrees/<repo>/<branch>` (because the agent has been on this branch before), it's reused.
+
+### Tools the agent can pick up
+
+Each tool is wired in as either an MCP server (per-user creds, allow/approve policy) or a vetted CLI wrapper that forwards over HTTP to `remote-cli`. Adding a new one is `proxies.ts` + a wrapper script.
+
+**Code & repo**
+- `git` (with disclaimer-injecting wrapper for PR/comment writes)
+- `gh` (GitHub CLI — PRs, reviews, comments, releases, runs)
+- `scoutqa` — browser-driven QA: navigate, click, screenshot, assert. Used for UI smoke testing on agent-built changes.
+
+**Knowledge & tickets**
+- Atlassian MCP (hosted): Jira issue CRUD, JQL search, Confluence page CRUD, CQL search, search/fetch — full Rovo MCP surface, per-user OAuth via Rovo API token
+- Salesforce MCP (Kally-owned): 10 tools — `sf_fetch_case`, `sf_soql_query`, `sf_get_bulk_cases`, `sf_list_attachments`, `sf_get_attachment`, `sf_post_comment`, `sf_update_status`, `sf_update_jira_link`, `sf_update_eta`, `sf_post_internal_note`. Approve-gated writes; per-user creds via `args` injection.
+- Google MCP (Kally-owned): Drive file ops — search, read, copy, list, metadata.
+
+**Observability**
+- `langfuse` — query past LLM traces by user / session / time. Lets the agent answer "what did I do last Tuesday and why?"
+- `metabase` — warehouse SQL via Metabase API. Schemas allowlisted via `METABASE_ALLOWED_SCHEMAS`; the agent can compose ad-hoc queries against your data warehouse without exposing credentials.
+- Grafana MCP — metrics queries via Grafana's own MCP server.
+- PostHog MCP — analytics queries (events, retention, funnels).
+
+**Operations**
+- `ldcli` — LaunchDarkly feature flag inspection (read-only). The agent can answer "which flags is user X in?" without dashboard access.
+- `sandbox` — Daytona-managed polyglot container for `pnpm install && pnpm test`-style commands the agent shouldn't run on the host.
+- `slack-post-message`, `slack-upload` — direct Slack write tools, separate from the MCP proxy path so the agent can post to channels it isn't proxying.
+- `mcp`, `approval` — the agent's own self-administration CLI (list configured tools, check approval queue state).
+
+**Generic shell** (in the opencode container itself)
+- `node`, `bash`, `curl`, `jq`, `rg` (ripgrep), `prettier`, `ruff`, `shfmt`. Anything heavier (`pnpm`, `npm`, `npx`, `corepack`) is redirected to the sandbox.
+
+### Sandbox execution for builds Kally doesn't trust
+
+`npm`, `npx`, `pnpm`, `pnpx`, `corepack` in the opencode container are wrappers that redirect to a Daytona-managed cloud sandbox. The agent calls `pnpm install && pnpm test` and the actual install + test run lands in an isolated polyglot container (Node 20/22, Java 17/21, Python 3.12, Docker-in-Docker), not the agent's host. Bundle sync is delta over a managed git remote. Output streams back as NDJSON.
 
 ### Multi-container Cloud Run for the runner
 
