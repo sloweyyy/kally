@@ -83,6 +83,40 @@ const { app } = createGatewayApp({
   vaultToken: config.kallyVaultToken || undefined,
 });
 
+// Eagerly preload workspace config with retry so GCS FUSE has time to
+// mount before the first Slack webhook arrives. Without this, cold-start
+// requests can hit getConfig() before /workspace/config.json is visible,
+// throwing "no previous config available" and 500ing every webhook.
+async function preloadConfig(): Promise<void> {
+  const maxAttempts = 10;
+  const baseDelayMs = 500;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const c = getConfig();
+      logInfo(log, "config_preloaded", {
+        attempt,
+        repos: Object.keys(c.repos),
+      });
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logWarn(log, "config_preload_attempt_failed", { attempt, error: msg });
+      if (attempt < maxAttempts) {
+        const delay = baseDelayMs * Math.pow(1.5, attempt - 1);
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        logError(log, "config_preload_giving_up", {
+          attempts: maxAttempts,
+          error: msg,
+          note: "starting anyway; webhooks may 500 until config becomes readable",
+        });
+      }
+    }
+  }
+}
+
+await preloadConfig();
+
 app.listen(config.port, () => {
   let configSummary: Record<string, unknown> = {};
   try {

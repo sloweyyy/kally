@@ -294,8 +294,9 @@ export function createConfigLoader(path: string): ConfigLoader {
         });
         return lastGood;
       }
+      const inner = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Failed to load workspace config from ${path} and no previous config available`,
+        `Failed to load workspace config from ${path} and no previous config available: ${inner}`,
       );
     }
   };
