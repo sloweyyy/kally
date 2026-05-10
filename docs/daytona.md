@@ -60,11 +60,11 @@ CI does this automatically:
 
 - **Workflow:** `.github/workflows/sandbox-e2e.yml`
 - **Trigger:** push to `docker/sandbox/**` or the workflow file itself, or manual `workflow_dispatch`.
-- **Output:** image pushed to `ghcr.io/scoutqa-dot-ai/thor-sandbox`, tagged with the long commit SHA and `latest` (on the default branch).
+- **Output:** image pushed to `ghcr.io/sloweyyy/kally-sandbox`, tagged with the long commit SHA and `latest` (on the default branch).
 
 The workflow uses the built-in `GITHUB_TOKEN` to push; no secrets are required.
 
-**First-time only:** the package is private on first push. Toggle it to public once in the [package settings](https://github.com/orgs/scoutqa-dot-ai/packages/container/thor-sandbox/settings), or register a pull credential with Daytona if you prefer to keep it private. After that, subsequent pushes keep the visibility.
+**First-time only:** the package is private on first push. Toggle it to public once in the [package settings](https://github.com/users/sloweyyy/packages/container/kally-sandbox/settings), or register a pull credential with Daytona if you prefer to keep it private. After that, subsequent pushes keep the visibility.
 
 ### Register the snapshot with Daytona
 
@@ -72,8 +72,8 @@ Once the image is published, create a snapshot in Daytona that points to it:
 
 1. Open the Daytona dashboard → **Snapshots** → **Create snapshot**.
 2. Source: **Container registry**.
-3. Image: `ghcr.io/scoutqa-dot-ai/thor-sandbox:latest` (or pin to a specific `:<sha>`).
-4. Name: `thor-sandbox` (or whatever you'll set `DAYTONA_SNAPSHOT` to).
+3. Image: `ghcr.io/sloweyyy/kally-sandbox:latest` (or pin to a specific `:<sha>`).
+4. Name: `kally-sandbox` (or whatever you'll set `DAYTONA_SNAPSHOT` to).
 5. Resources: 4 CPU / 8 GiB RAM / 10 GiB disk is a good starting point.
 6. Save and wait for the snapshot to reach `Ready`.
 
@@ -82,7 +82,7 @@ Once the image is published, create a snapshot in Daytona that points to it:
 Set the env var in `.env`:
 
 ```
-DAYTONA_SNAPSHOT=thor-sandbox
+DAYTONA_SNAPSHOT=kally-sandbox
 ```
 
 Restart the `remote-cli` service. New sandboxes will launch from the custom snapshot; existing sandboxes keep whichever snapshot they were created from — delete them (`sandbox --list`, then delete in the Daytona UI) if you want them to be recreated from the new snapshot.
