@@ -13,6 +13,12 @@ export {
   getInstallationIdForOwner,
   interpolateEnv,
   interpolateHeaders,
+  checkUserAccess,
+} from "./workspace-config.js";
+export type {
+  AccessPolicy,
+  AccessUser,
+  AccessDecision,
 } from "./workspace-config.js";
 export { PROXY_NAMES, PROXY_REGISTRY, isProxyName, getProxyConfig } from "./proxies.js";
 export {
