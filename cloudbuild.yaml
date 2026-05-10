@@ -2,6 +2,11 @@ timeout: 3600s
 options:
   machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY
+  # The Dockerfile uses `RUN --mount=type=cache,...` and per-package
+  # build stages that depend on BuildKit. Without DOCKER_BUILDKIT=1 the
+  # legacy builder rejects the --mount flag at step "RUN ... pnpm fetch".
+  env:
+    - "DOCKER_BUILDKIT=1"
 
 steps:
   - name: gcr.io/cloud-builders/docker
