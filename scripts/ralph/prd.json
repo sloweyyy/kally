@@ -1,0 +1,101 @@
+{
+  "project": "kally",
+  "branchName": "merge/upstream-thor",
+  "description": "Post-merge cleanup for PR #5 (upstream/thor merge). Verify Cloud Run still works on the merged sources, wire missing third-party credentials, and prove the @Kally → reply path end-to-end.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Rebuild Cloud Run gateway image from merged sources and redeploy",
+      "description": "PR #5 changed @kally/gateway sources (URL-scheme handling for REMOTE_CLI_HOST stayed; upstream refactors were absorbed). The Cloud Run gateway service is still running the pre-merge image. Rebuild the gateway image via cloudbuild-gateway.yaml against the merge branch and redeploy to Cloud Run.",
+      "acceptanceCriteria": [
+        "gcloud builds submit --config=cloudbuild-gateway.yaml succeeds on merge/upstream-thor branch",
+        "gcloud run services update gateway --image=us-central1-docker.pkg.dev/kally-lab-a8e32b/kally/gateway:latest succeeds",
+        "curl https://gateway-826113265397.us-central1.run.app/health returns status: ok",
+        "deepHealthCheck (the /health response) lists runner, slack-mcp, remote-cli all status: ok"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Cloudbuild config already exists at cloudbuild-gateway.yaml. Project is kally-lab-a8e32b. Region us-central1."
+    },
+    {
+      "id": "US-002",
+      "title": "Smoke-test @Kally hi end-to-end on Cloud Run after rebuild",
+      "description": "Verify the rebuilt gateway can drive the full chain by inspecting health and recent log severity. Cannot send Slack messages from Ralph (bot is the assistant identity), so this story checks observable signals after redeploy.",
+      "acceptanceCriteria": [
+        "curl gateway /health JSON: services.runner.status==ok, services.slack-mcp.status==ok, services.remote-cli.status==ok",
+        "gcloud logging read for gateway last 5 min: zero entries with severity>=ERROR (excluding repeated event_ignored_self which is benign)",
+        "runner /health JSON: opencode==connected"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Slack app is configured with Event Subscriptions URL https://gateway-826113265397.us-central1.run.app/slack/events"
+    },
+    {
+      "id": "US-003",
+      "title": "Verify GHCR kally-sandbox image is publicly pullable",
+      "description": "User reports they made the kally-sandbox package public after Daytona returned 403 on snapshot create. Confirm by running an unauthenticated docker pull.",
+      "acceptanceCriteria": [
+        "`docker pull ghcr.io/sloweyyy/kally-sandbox:latest` succeeds without prior `docker login`",
+        "GitHub package settings page shows visibility: Public"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Latest tag should exist after the first sandbox-e2e run on the merge branch."
+    },
+    {
+      "id": "US-004",
+      "title": "Confirm Sandbox E2E and Core E2E pass on the merge PR",
+      "description": "After the GitHub App ID default fix, KALLY_VAULT secrets generation, and Dockerfile @kally rename, the merge PR's CI gauntlet should be green.",
+      "acceptanceCriteria": [
+        "gh run list --branch merge/upstream-thor shows latest Core E2E conclusion: success",
+        "gh run list --branch merge/upstream-thor shows latest Sandbox E2E conclusion: success",
+        "PR #5 mergeable status: clean (no failed required checks)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "If failing, surface the actual error (don't loop blindly retrying)."
+    },
+    {
+      "id": "US-005",
+      "title": "Wire Salesforce MCP credentials via Secret Manager",
+      "description": "salesforce-mcp Cloud Run service has no SALESFORCE_* env vars set. First tool call will fail. Add the 5 SALESFORCE_* env vars as secrets and bind them to the service.",
+      "acceptanceCriteria": [
+        "User has provided SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, SALESFORCE_USERNAME, SALESFORCE_PASSWORD, SALESFORCE_INSTANCE_URL (or this story is paused with notes asking for them)",
+        "Each secret created in gcloud secrets",
+        "salesforce-mcp service updated with --update-secrets to bind all 5",
+        "Health endpoint reports salesforce: connected with non-zero tool count"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Stop and ask the user for the 5 Salesforce values before creating empty secrets. Don't fabricate."
+    },
+    {
+      "id": "US-006",
+      "title": "Wire Google MCP service-account credentials",
+      "description": "google-mcp Cloud Run service has no GOOGLE_APPLICATION_CREDENTIALS configured. Drive operations will fail. Mount a service-account JSON via Secret Manager.",
+      "acceptanceCriteria": [
+        "User has provided a Google service-account JSON with Drive API access (or this story is paused asking for it)",
+        "Service-account JSON stored as secret GOOGLE_APPLICATION_CREDENTIALS_JSON",
+        "google-mcp service updated to mount the secret as a file at /var/secrets/google/sa.json and set GOOGLE_APPLICATION_CREDENTIALS env",
+        "Health endpoint reports google: connected with non-zero tool count"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Stop and ask the user for the JSON before fabricating."
+    },
+    {
+      "id": "US-007",
+      "title": "Wire Atlassian basic-auth for the proxy",
+      "description": "Workspace config uses ${ATLASSIAN_BASIC_AUTH} for the Atlassian upstream. Currently unset, so atlassian: connected=false in remote-cli MCP fan-out.",
+      "acceptanceCriteria": [
+        "User has provided ATLASSIAN_BASIC_AUTH (base64 of email:api_token) or this story is paused asking for it",
+        "Secret ATLASSIAN_BASIC_AUTH created",
+        "Updated in any service that interpolates it (gateway via workspace config substitution)",
+        "Health endpoint shows atlassian: connected=true"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Stop and ask the user before fabricating."
+    }
+  ]
+}
