@@ -14,8 +14,8 @@
         "deepHealthCheck (the /health response) lists runner, slack-mcp, remote-cli all status: ok"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Cloudbuild config already exists at cloudbuild-gateway.yaml. Project is kally-lab-a8e32b. Region us-central1."
+      "passes": true,
+      "notes": "Done. Build needed DOCKER_BUILDKIT=1 in cloudbuild-gateway.yaml to support Dockerfile --mount=cache. Service needed new env vars from merged code: GITHUB_APP_SLUG=thor, GITHUB_APP_BOT_ID=49699333, plus secrets THOR_INTERNAL_SECRET and GITHUB_WEBHOOK_SECRET (both random 32-byte hex). Revision gateway-00007-b9w now serving 100%. /health returns status: ok with runner.status=ok, remote-cli.status=ok. Note: deepHealth schema changed post-merge — slack-mcp moved under remote-cli.mcp.instances.slack rather than top-level."
     },
     {
       "id": "US-002",
