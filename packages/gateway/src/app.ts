@@ -951,7 +951,9 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
   /** Read allowed channels dynamically from config on each call. */
   const isChannelAllowed = (channel: string): boolean => {
     if (!config.getConfig) return true; // no config = allow all
-    return getAllowedChannelIds(config.getConfig()).has(channel);
+    const ids = getAllowedChannelIds(config.getConfig());
+    if (ids.has("*")) return true; // wildcard = allow all
+    return ids.has(channel);
   };
   /** Read channel→repo map dynamically from config on each call. */
   const getChannelRepos = (): Map<string, string> | undefined => {
