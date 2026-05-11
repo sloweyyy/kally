@@ -1,7 +1,7 @@
 import { APPROVAL_TOOL_NAMES } from "./approval-events.js";
 import type { ProxyConfig } from "./workspace-config.js";
 
-export const PROXY_NAMES = ["atlassian", "grafana", "posthog"] as const;
+export const PROXY_NAMES = ["atlassian", "grafana", "posthog", "slack"] as const;
 
 export type ProxyName = (typeof PROXY_NAMES)[number];
 
@@ -45,6 +45,11 @@ export const PROXY_REGISTRY: Record<ProxyName, ProxyConfig> = {
       "tempo_get-attribute-values",
       "tempo_docs-traceql",
     ],
+    approve: [],
+  },
+  slack: {
+    upstream: { url: "${SLACK_MCP_URL}/mcp" },
+    allow: ["post_message", "read_thread", "get_channel_history", "get_slack_file"],
     approve: [],
   },
   posthog: {
