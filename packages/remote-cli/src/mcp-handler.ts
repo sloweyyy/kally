@@ -11,6 +11,7 @@ import {
   getRepoUpstreams,
   getRunnerBaseUrl,
   ApprovalRequiredEventPayloadSchema,
+  interpolateEnv,
   interpolateHeaders,
   logError,
   logInfo,
@@ -194,7 +195,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
   async function connectInstance(name: string, proxyDef: ProxyConfig): Promise<ProxyInstance> {
     const interpolatedHeaders = interpolateHeaders(proxyDef.upstream.headers);
     const upstreamConfig = {
-      url: proxyDef.upstream.url,
+      url: interpolateEnv(proxyDef.upstream.url),
       headers: interpolatedHeaders,
     };
 
