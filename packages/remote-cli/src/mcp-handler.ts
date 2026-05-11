@@ -55,10 +55,38 @@ function addDisclaimerToApprovalArgs(
   return { ...args, [field]: `${args[field]}\n${footer}` };
 }
 
+interface UserConnection {
+  upstream: UpstreamConnection;
+  lastUsedAt: number;
+}
+
 interface ProxyInstance {
   name: string;
   upstream: UpstreamConnection;
   approvalStore: ApprovalStore;
+  /** Per-user MCP connections, keyed by Slack uid. Populated lazily by
+   *  upstreams with `creds_injection: "connection"` (e.g. atlassian).
+   *  Each entry holds an MCP session authenticated as that user. */
+  userConnections: Map<string, UserConnection>;
+}
+
+/** Evict per-user connections after this many ms of inactivity. */
+const USER_CONNECTION_IDLE_MS = 30 * 60 * 1000;
+
+/** Convert vault-stored creds into upstream auth headers. Returns undefined
+ *  if the creds shape doesn't match a provider we know how to authenticate. */
+function buildUpstreamAuthHeaders(
+  provider: string,
+  creds: Record<string, unknown>,
+): Record<string, string> | undefined {
+  if (provider === "atlassian") {
+    const email = typeof creds.email === "string" ? creds.email : undefined;
+    const token = typeof creds.api_token === "string" ? creds.api_token : undefined;
+    if (!email || !token) return undefined;
+    const basic = Buffer.from(`${email}:${token}`).toString("base64");
+    return { Authorization: `Basic ${basic}` };
+  }
+  return undefined;
 }
 
 export interface McpExecResult {
@@ -270,7 +298,75 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       name,
       upstream,
       approvalStore: getApprovalStore(name),
+      userConnections: new Map(),
     };
+  }
+
+  // Per-user upstream connections for `creds_injection: "connection"`.
+  // Each user gets their own MCP session with their auth headers, so
+  // actions on the upstream identify as the calling Slack user, not the
+  // shared service identity.
+  const userConnecting = new Map<string, Promise<UserConnection>>();
+
+  async function getUserInstance(
+    instance: ProxyInstance,
+    proxyDef: ProxyConfig,
+    slack_uid: string,
+    authHeaders: Record<string, string>,
+  ): Promise<UserConnection> {
+    const existing = instance.userConnections.get(slack_uid);
+    if (existing) {
+      existing.lastUsedAt = Date.now();
+      return existing;
+    }
+    const key = `${instance.name}:${slack_uid}`;
+    const inflight = userConnecting.get(key);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      const staticHeaders = interpolateHeaders(proxyDef.upstream.headers) ?? {};
+      const headers: Record<string, string> = { ...staticHeaders, ...authHeaders };
+      logInfo(log, "user_upstream_connecting", { upstream: instance.name, slack_uid });
+      const upstream = await connectUpstreamFn(
+        `${instance.name}:user:${slack_uid.slice(0, 8)}`,
+        { url: interpolateEnv(proxyDef.upstream.url), headers },
+        () => {
+          instance.userConnections.delete(slack_uid);
+          logWarn(log, "user_upstream_disconnected", { upstream: instance.name, slack_uid });
+        },
+      );
+      const entry: UserConnection = { upstream, lastUsedAt: Date.now() };
+      instance.userConnections.set(slack_uid, entry);
+      return entry;
+    })();
+
+    userConnecting.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      userConnecting.delete(key);
+    }
+  }
+
+  let evictionTimer: NodeJS.Timeout | undefined;
+  function startUserConnectionEviction(): void {
+    if (evictionTimer) return;
+    evictionTimer = setInterval(() => {
+      const cutoff = Date.now() - USER_CONNECTION_IDLE_MS;
+      for (const instance of instances.values()) {
+        for (const [uid, entry] of instance.userConnections.entries()) {
+          if (entry.lastUsedAt < cutoff) {
+            instance.userConnections.delete(uid);
+            void entry.upstream.client.close().catch(() => {});
+            logInfo(log, "user_upstream_evicted", {
+              upstream: instance.name,
+              slack_uid: uid,
+              idleMs: Date.now() - entry.lastUsedAt,
+            });
+          }
+        }
+      }
+    }, USER_CONNECTION_IDLE_MS).unref();
   }
 
   async function getInstance(name: string): Promise<ProxyInstance | undefined> {
@@ -522,6 +618,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     // the user has not enrolled. "connection" mode (per-user MCP session)
     // is not yet wired and surfaces a clear message instead of pretending.
     let injectedArgs: Record<string, unknown> | undefined;
+    let userUpstream: UpstreamConnection | undefined;
     if (proxy?.per_user_creds) {
       if (!deps.vaultClient) {
         logError(log, "vault_required_but_missing", "per_user_creds set but vault unconfigured", {
@@ -563,21 +660,34 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       if (mode === "args") {
         injectedArgs = { ...args, credentials: lookup.creds };
       } else {
-        // TODO: implement per-user MCP connection (connection mode). For
-        // now, decline the call rather than fall back to the shared
-        // upstream which would call as the service identity.
-        logWarn(log, "creds_injection_connection_not_implemented", {
-          upstream: upstreamName,
-          tool: toolInfo.name,
-        });
-        return fail(
-          `Per-user connection injection for "${upstreamName}" is not yet wired up. ` +
-            `Run the same query against an upstream that supports "args" injection ` +
-            `(e.g. salesforce), or wait for the connection-mode wiring to land.\n`,
-        );
+        // Connection mode: open (or reuse) a per-user MCP session whose
+        // upstream Authorization header is built from the user's vault
+        // creds. The shared instance.upstream is NOT used for this call.
+        const authHeaders = buildUpstreamAuthHeaders(upstreamName, lookup.creds);
+        if (!authHeaders) {
+          return fail(
+            `Stored credentials for ${upstreamName} are missing expected fields. Re-run \`/kally connect ${upstreamName}\`.\n`,
+          );
+        }
+        try {
+          const userInst = await getUserInstance(instance, proxy, context.userSlackId, authHeaders);
+          userUpstream = userInst.upstream;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logError(log, "user_upstream_connect_failed", message, {
+            upstream: upstreamName,
+            slack_uid: context.userSlackId,
+          });
+          return fail(
+            `Couldn't authenticate to ${upstreamName} with your saved credentials. They may be expired — run \`/kally disconnect ${upstreamName}\` then \`/kally connect ${upstreamName}\`.\n`,
+          );
+        }
       }
     }
     const effectiveArgs = injectedArgs ?? args;
+    const effectiveInstance: ProxyInstance = userUpstream
+      ? { ...instance, upstream: userUpstream }
+      : instance;
 
     if (toolInfo.classification === "approve") {
       let approvalArgs: Record<string, unknown>;
@@ -611,7 +721,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     }
 
     return executeUpstreamCall({
-      instance,
+      instance: effectiveInstance,
       toolName: toolInfo.name,
       args: effectiveArgs,
       logEvent: "tool_call",
@@ -782,12 +892,23 @@ export function createMcpService(deps: McpServiceDeps): McpService {
           logError(log, "upstream_connect_failed", result.reason, { name: upstreamNames[index] });
         }
       }
+      startUserConnectionEviction();
     },
 
     async closeAll(): Promise<void> {
-      await Promise.allSettled(
-        [...instances.values()].map((instance) => instance.upstream.client.close()),
-      );
+      if (evictionTimer) {
+        clearInterval(evictionTimer);
+        evictionTimer = undefined;
+      }
+      const allUpstreams: Promise<unknown>[] = [];
+      for (const instance of instances.values()) {
+        allUpstreams.push(instance.upstream.client.close());
+        for (const entry of instance.userConnections.values()) {
+          allUpstreams.push(entry.upstream.client.close());
+        }
+        instance.userConnections.clear();
+      }
+      await Promise.allSettled(allUpstreams);
     },
 
     async executeMcp(args: string[], context: McpCommandContext): Promise<McpExecResult> {
