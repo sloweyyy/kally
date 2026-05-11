@@ -5,15 +5,12 @@ options:
 
 steps:
   - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     args:
-      [
-        "build",
-        "--target",
-        "opencode",
-        "-t",
-        "us-central1-docker.pkg.dev/$PROJECT_ID/kally/opencode:latest",
-        ".",
-      ]
+      - -c
+      - |
+        export DOCKER_BUILDKIT=1
+        docker build --target opencode -t us-central1-docker.pkg.dev/$PROJECT_ID/kally/opencode:latest .
 
 images:
   - us-central1-docker.pkg.dev/$PROJECT_ID/kally/opencode:latest
