@@ -13,7 +13,6 @@ import {
   getChannelRepoMap,
   truncate,
   resolveRepoDirectory,
-  invalidateProxyUserConnections,
   type ConfigLoader,
   type InboundWebhookHistoryEntry,
   type VaultClient,
@@ -482,11 +481,7 @@ export interface GatewayAppConfig extends RunnerDeps {
   /** Vault client for credential enrollment. When unset, /slack/commands
    *  rejects with a "not configured" message. */
   vaultClient?: VaultClient;
-  /** Proxy hostname for cache invalidation after credential changes. Default: "proxy". */
-  proxyHost?: string;
-  /** Proxy port for cache invalidation after credential changes. Default: 3001. */
-  proxyPort?: number;
-  /** Vault token used for proxy invalidation. Falls back to KALLY_VAULT_TOKEN env. */
+  /** Vault token (carried for future per-user-cred cache invalidation). Falls back to KALLY_VAULT_TOKEN env. */
   vaultToken?: string;
 }
 
@@ -985,8 +980,6 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
   void userResolver;
   const slackWeb = config.slackWebClient;
   const vault = config.vaultClient;
-  const proxyHost = config.proxyHost ?? "proxy";
-  const proxyPort = config.proxyPort ?? 3001;
 
   const queue = new EventQueue({
     dir: config.queueDir ?? "data/queue",
@@ -1506,14 +1499,6 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
         .then(async ({ response, dm }) => {
           res.status(200).json(response);
           if (dm) {
-            const proxyUrl = `http://${proxyHost}:${proxyPort}`;
-            const vaultToken = config.vaultToken ?? process.env.KALLY_VAULT_TOKEN ?? "";
-            await invalidateProxyUserConnections(
-              proxyUrl,
-              vaultToken,
-              submission.user.id,
-              config.fetchImpl,
-            );
             await slackWeb.chatPostMessageDM(submission.user.id, dm.text);
           }
         })
@@ -1636,11 +1621,6 @@ export function createGatewayApp(config: GatewayAppConfig): GatewayApp {
       res.status(200).send("");
       void (async () => {
         const del = await vault.delete(cmd.user_id, provider);
-        if (del.ok) {
-          const proxyUrl = `http://${proxyHost}:${proxyPort}`;
-          const vaultToken = config.vaultToken ?? process.env.KALLY_VAULT_TOKEN ?? "";
-          await invalidateProxyUserConnections(proxyUrl, vaultToken, cmd.user_id, config.fetchImpl);
-        }
         const msg = del.ok
           ? `✅ Your ${provider} credentials were removed from the vault. Run \`/kally connect ${provider}\` to re-enroll.`
           : del.status === 404

@@ -90,7 +90,7 @@ export type {
   ActiveTriggerResult,
   ReverseAnchorEntry,
 } from "./event-log.js";
-export { createVaultClient, invalidateProxyUserConnections } from "./vault-client.js";
+export { createVaultClient } from "./vault-client.js";
 export type {
   VaultClient,
   VaultClientConfig,

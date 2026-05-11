@@ -78,8 +78,6 @@ const { app } = createGatewayApp({
   userResolver,
   slackWebClient,
   vaultClient,
-  proxyHost: config.proxyHost,
-  proxyPort: config.proxyPort,
   vaultToken: config.kallyVaultToken || undefined,
 });
 

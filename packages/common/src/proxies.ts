@@ -1,7 +1,14 @@
 import { APPROVAL_TOOL_NAMES } from "./approval-events.js";
 import type { ProxyConfig } from "./workspace-config.js";
 
-export const PROXY_NAMES = ["atlassian", "grafana", "posthog", "slack"] as const;
+export const PROXY_NAMES = [
+  "atlassian",
+  "grafana",
+  "posthog",
+  "slack",
+  "salesforce",
+  "google",
+] as const;
 
 export type ProxyName = (typeof PROXY_NAMES)[number];
 
@@ -51,6 +58,37 @@ export const PROXY_REGISTRY: Record<ProxyName, ProxyConfig> = {
     upstream: { url: "${SLACK_MCP_URL}/mcp" },
     allow: ["post_message", "read_thread", "get_channel_history", "get_slack_file"],
     approve: [],
+  },
+  salesforce: {
+    upstream: { url: "${SALESFORCE_MCP_URL}/mcp" },
+    access: "support",
+    per_user_creds: true,
+    creds_injection: "args",
+    allow: [
+      "sf_fetch_case",
+      "sf_soql_query",
+      "sf_get_bulk_cases",
+      "sf_list_attachments",
+      "sf_get_attachment",
+    ],
+    approve: [
+      "sf_post_comment",
+      "sf_update_status",
+      "sf_update_jira_link",
+      "sf_update_eta",
+      "sf_post_internal_note",
+    ],
+  },
+  google: {
+    upstream: { url: "${GOOGLE_MCP_URL}/mcp" },
+    access: "support",
+    allow: ["ot_read_sheet", "ot_find_employee_row", "ot_list_employees", "drive_list_files"],
+    approve: [
+      "ot_update_evidence",
+      "drive_create_folder",
+      "drive_upload_file",
+      "drive_upload_base64",
+    ],
   },
   posthog: {
     upstream: {

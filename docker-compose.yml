@@ -195,6 +195,8 @@ services:
       - REMOTE_CLI_HOST=remote-cli
       - REMOTE_CLI_PORT=3004
       - THOR_INTERNAL_SECRET=${THOR_INTERNAL_SECRET:?set THOR_INTERNAL_SECRET}
+      - KALLY_VAULT_URL=http://vault:3006
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:?set KALLY_VAULT_TOKEN}
     volumes:
       - ./docker-volumes/workspace:/workspace
       - ./docker-volumes/opencode:/opencode:ro
@@ -203,6 +205,8 @@ services:
         condition: service_started
       remote-cli:
         condition: service_healthy
+      vault:
+        condition: service_started
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>{if(!r.ok)throw 1})"]

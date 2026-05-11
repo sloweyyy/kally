@@ -40,10 +40,6 @@ export function loadGatewayEnv(env: EnvSource = process.env) {
     // slash-command handler responds with "not configured" rather than crashing.
     kallyVaultUrl: envOptionalString(env, "KALLY_VAULT_URL") ?? "",
     kallyVaultToken: envOptionalString(env, "KALLY_VAULT_TOKEN") ?? "",
-    // Proxy host/port used to invalidate cached per-user upstream connections
-    // after a credential rotation.
-    proxyHost: envString(env, "PROXY_HOST", "proxy"),
-    proxyPort: envInt(env, "PROXY_PORT", 3001),
   };
 }
 

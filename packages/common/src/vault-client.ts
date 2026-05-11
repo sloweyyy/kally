@@ -59,34 +59,6 @@ export interface VaultClient {
   >;
 }
 
-/**
- * Notify the proxy to evict cached per-user upstream connections for a
- * user after their credentials change. Without this, a user's next tool
- * call after `/kally connect` could reuse a stale MCP session opened
- * with the old credentials (up to 30 min of idle TTL).
- *
- * The proxy accepts the same vault bearer token. Best-effort — a failure
- * here doesn't break enrollment; it just means the stale cache lives
- * until TTL expires.
- */
-export async function invalidateProxyUserConnections(
-  proxyBaseUrl: string,
-  vaultToken: string,
-  slack_uid: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<void> {
-  if (!proxyBaseUrl || !vaultToken) return;
-  try {
-    await fetchImpl(`${proxyBaseUrl.replace(/\/$/, "")}/user-connections/${slack_uid}/invalidate`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${vaultToken}` },
-      signal: AbortSignal.timeout(3_000),
-    });
-  } catch {
-    // best-effort, swallow
-  }
-}
-
 export function createVaultClient(config: VaultClientConfig): VaultClient {
   const baseUrl = config.baseUrl.replace(/\/$/, "");
   const fetchImpl = config.fetchImpl ?? fetch;

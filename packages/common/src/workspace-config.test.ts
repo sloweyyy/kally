@@ -90,14 +90,12 @@ describe("loadWorkspaceConfig", () => {
     expect(config.repos["my-repo"].proxies).toEqual(["posthog"]);
   });
 
-  it("rejects removed slack proxy in repo proxies", () => {
+  it("accepts slack/salesforce/google proxies (re-registered after merge)", () => {
     const path = writeConfig("config.json", {
-      repos: { "my-repo": { proxies: ["slack"] } },
+      repos: { "my-repo": { proxies: ["slack", "salesforce", "google"] } },
     });
-
-    expect(() => loadWorkspaceConfig(path)).toThrow(
-      'Unknown proxy "slack". Available proxies: atlassian, grafana, posthog',
-    );
+    const config = loadWorkspaceConfig(path);
+    expect(config.repos["my-repo"].proxies).toEqual(["slack", "salesforce", "google"]);
   });
 
   it("throws when repo references unknown proxy", () => {
