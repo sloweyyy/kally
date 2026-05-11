@@ -29,3 +29,4 @@ __pycache__/
 *.pyc
 /.claude/
 scripts/ralph/
+.tmp-config-fixed.json
