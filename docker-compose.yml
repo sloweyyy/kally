@@ -41,6 +41,8 @@ services:
       - DAYTONA_API_URL=${DAYTONA_API_URL:-https://app.daytona.io/api}
       - DAYTONA_SNAPSHOT=${DAYTONA_SNAPSHOT:-}
       - RUNNER_BASE_URL=${RUNNER_BASE_URL:?set RUNNER_BASE_URL}
+      - KALLY_VAULT_URL=http://vault:3006
+      - KALLY_VAULT_TOKEN=${KALLY_VAULT_TOKEN:?set KALLY_VAULT_TOKEN}
     volumes:
       - ./docker-volumes/home/thor:/home/thor
       - ./docker-volumes/workspace:/workspace
@@ -49,6 +51,8 @@ services:
     depends_on:
       grafana-mcp:
         condition: service_healthy
+      vault:
+        condition: service_started
     healthcheck:
       test:
         ["CMD", "node", "-e", "fetch('http://localhost:3004/health').then(r=>{if(!r.ok)throw 1})"]

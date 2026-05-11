@@ -8,9 +8,11 @@ import {
   computeGitCorrelationKey,
   createConfigLoader,
   createLogger,
+  createVaultClient,
   getRunnerBaseUrl,
   logError,
   logInfo,
+  logWarn,
   loadRemoteCliAppEnv,
   loadRemoteCliEnv,
   loadRemoteCliGitHubEnv,
@@ -18,6 +20,7 @@ import {
   matchesInternalSecret,
   type ConfigLoader,
   type ExecStreamEvent,
+  type VaultClient,
   WORKSPACE_CONFIG_PATH,
 } from "@kally/common";
 import { execCommand, execCommandStream } from "./exec.js";
@@ -1024,7 +1027,30 @@ function hasLdcliOutputOverride(args: string[]): boolean {
 export async function startRemoteCliServer(): Promise<void> {
   const envConfig = loadRemoteCliEnv();
   const gitIdentity = deriveBotGitIdentity();
-  const remoteCli = createRemoteCliApp({ env: envConfig });
+  // Optional vault client. When KALLY_VAULT_URL + KALLY_VAULT_TOKEN are
+  // set, mcp-handler can look up per-user credentials for proxies that
+  // declare `per_user_creds: true` (salesforce, atlassian). Without it,
+  // those proxies fail closed.
+  const vaultUrl = process.env.KALLY_VAULT_URL ?? "";
+  const vaultToken = process.env.KALLY_VAULT_TOKEN ?? "";
+  let vaultClient: VaultClient | undefined;
+  if (vaultUrl && vaultToken) {
+    vaultClient = createVaultClient({
+      baseUrl: vaultUrl,
+      token: vaultToken,
+      actor: "remote-cli",
+      logger: log,
+    });
+    logInfo(log, "vault_configured", { url: vaultUrl });
+  } else {
+    logWarn(log, "vault_not_configured", {
+      note: "KALLY_VAULT_URL/KALLY_VAULT_TOKEN unset — per_user_creds proxies will fail closed",
+    });
+  }
+  const remoteCli = createRemoteCliApp({
+    env: envConfig,
+    mcp: { vaultClient },
+  });
   logInfo(log, "remote_cli_starting", {
     port: envConfig.port,
     gitIdentityName: gitIdentity.name,

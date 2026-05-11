@@ -19,6 +19,7 @@ import {
   PROXY_NAMES,
   type ConfigLoader,
   type ProxyConfig,
+  type VaultClient,
   type WorkspaceConfig,
   writeToolCallLog,
 } from "@kally/common";
@@ -83,6 +84,10 @@ export interface McpServiceDeps {
   isProduction?: boolean;
   connectUpstreamFn?: typeof connectUpstream;
   writeToolCallLogFn?: typeof writeToolCallLog;
+  /** Vault client. When set, proxies with `per_user_creds: true` look up the
+   *  caller's stored credentials and inject them. Without it, those upstreams
+   *  fail closed so we never silently call as a shared identity. */
+  vaultClient?: VaultClient;
 }
 
 interface ToolInfo {
@@ -509,10 +514,75 @@ export function createMcpService(deps: McpServiceDeps): McpService {
       }
     }
 
+    // Per-user credential injection. Restored from the pre-merge proxy
+    // package (commit 08dce6e). Upstreams declaring `per_user_creds: true`
+    // (salesforce, atlassian) cannot be called with a shared service
+    // identity — we look up the triggering user's vault entry and inject
+    // it. Fail closed if vault is missing, user identity is missing, or
+    // the user has not enrolled. "connection" mode (per-user MCP session)
+    // is not yet wired and surfaces a clear message instead of pretending.
+    let injectedArgs: Record<string, unknown> | undefined;
+    if (proxy?.per_user_creds) {
+      if (!deps.vaultClient) {
+        logError(log, "vault_required_but_missing", "per_user_creds set but vault unconfigured", {
+          upstream: upstreamName,
+        });
+        return fail(
+          `Vault is not configured. Per-user credentials for "${upstreamName}" cannot be loaded. Contact the Kally admin.\n`,
+        );
+      }
+      if (!context.userSlackId) {
+        return fail(
+          `I can't tell who triggered this call. Run the action from a Slack message where your identity is attached, then try again.\n`,
+        );
+      }
+      const provider = upstreamName as Parameters<VaultClient["get"]>[1];
+      const lookup = await deps.vaultClient.get<Record<string, unknown>>(
+        context.userSlackId,
+        provider,
+        toolInfo.name,
+      );
+      if (!lookup.ok) {
+        if (lookup.status === 404) {
+          logInfo(log, "per_user_creds_missing", {
+            upstream: upstreamName,
+            tool: toolInfo.name,
+            ...getThorIds(context),
+          });
+          return fail(
+            `I don't have your ${upstreamName} credentials yet. Run \`/kally connect ${upstreamName}\` in Slack to enroll, then try again.\n`,
+          );
+        }
+        logError(log, "vault_unreachable", lookup.error ?? "", {
+          upstream: upstreamName,
+          status: lookup.status,
+        });
+        return fail(`Vault unreachable (${lookup.status}). Try again in a moment.\n`);
+      }
+      const mode = proxy.creds_injection ?? "args";
+      if (mode === "args") {
+        injectedArgs = { ...args, credentials: lookup.creds };
+      } else {
+        // TODO: implement per-user MCP connection (connection mode). For
+        // now, decline the call rather than fall back to the shared
+        // upstream which would call as the service identity.
+        logWarn(log, "creds_injection_connection_not_implemented", {
+          upstream: upstreamName,
+          tool: toolInfo.name,
+        });
+        return fail(
+          `Per-user connection injection for "${upstreamName}" is not yet wired up. ` +
+            `Run the same query against an upstream that supports "args" injection ` +
+            `(e.g. salesforce), or wait for the connection-mode wiring to land.\n`,
+        );
+      }
+    }
+    const effectiveArgs = injectedArgs ?? args;
+
     if (toolInfo.classification === "approve") {
       let approvalArgs: Record<string, unknown>;
       try {
-        approvalArgs = addDisclaimerToApprovalArgs(toolInfo.name, args, context.sessionId);
+        approvalArgs = addDisclaimerToApprovalArgs(toolInfo.name, effectiveArgs, context.sessionId);
       } catch (err) {
         return fail(err instanceof Error ? err.message : String(err));
       }
@@ -543,7 +613,7 @@ export function createMcpService(deps: McpServiceDeps): McpService {
     return executeUpstreamCall({
       instance,
       toolName: toolInfo.name,
-      args,
+      args: effectiveArgs,
       logEvent: "tool_call",
       decision: "allowed",
       extraLogFields: getThorIds(context),
